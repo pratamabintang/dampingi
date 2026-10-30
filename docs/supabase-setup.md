@@ -143,4 +143,5 @@ A run that ends nonzero can still have swept successfully — the sweep never tu
 | Register fails with a password policy error | Supabase enforces a minimum length (default 8); the app pre-validates to match |
 | `/me` always 401 with "no trusted signing key matched" | Project still uses the legacy JWT secret (step 5) |
 | 409 on register of a brand-new email | That Gmail already registered in this project (a previous test run that crashed before cleanup, for example) — delete it from **Authentication → Users** |
+| Tests fail with `{"detail":"Request rate limit reached"}` (429) but pass when rerun after a pause | Supabase throttles the Auth API per IP. Running the live suite twice back-to-back can trip it. Wait a minute (or run `python admin.py status` — it works during the window) and rerun; a red run still sweeps its users |
 | `python admin.py` calls fail with "Forbidden use of secret API key in browser" | The Supabase gateway blocks secret-key calls from browser-like user agents. The CLI uses plain `httpx` (not a browser UA), so this shouldn't happen; if it does, check you're running `admin.py` from the repo, not through some browser-based tool |
