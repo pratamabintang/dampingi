@@ -119,6 +119,11 @@ Invoke-RestMethod -Method Post `
 $t = "<access_token from above>"
 Invoke-RestMethod -Uri "http://localhost:8000/me" -Headers @{ Authorization = "Bearer $t" }
 # => { id, email, name }
+
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/auth/logout" -Headers @{ Authorization = "Bearer $t" }
+# => 204: every session revoked. NOTE: $t itself keeps working until it
+#    expires (~1h) — Supabase has no access-token revocation; logout kills
+#    refresh tokens, so no NEW tokens can be minted from any session.
 ```
 
 ## 8. Test-user hygiene (admin CLI)
@@ -149,7 +154,8 @@ A run that ends nonzero can still have swept successfully — the sweep never tu
 | Register fails with a password policy error | Supabase enforces a minimum length (default 8); the app pre-validates to match |
 | `/me` always 401 with "no trusted signing key matched" | Project still uses the legacy JWT secret (step 5) |
 | 409 on register of a brand-new email | That Gmail already registered in this project (a previous test run that crashed before cleanup, for example) — delete it from **Authentication → Users** |
-| Tests fail with `{"detail":"Request rate limit reached"}` (429) but pass when rerun after a pause | Supabase throttles the Auth API per IP. The live suite makes ~70 auth-API calls per run (each delete test adds signup + logout + ban + tombstone), so back-to-back runs trip it. Wait ~5 minutes and rerun; a red run still sweeps its users |
+| Tests fail with `{"detail":"Request rate limit reached"}` (429) but pass when rerun after a pause | Supabase throttles the Auth API per IP. The live suite makes ~80 auth-API calls per run (each delete test adds signup + logout + ban + tombstone; each logout test adds signup + logout), so back-to-back runs trip it. Wait ~5 minutes and rerun; a red run still sweeps its users |
+| A logged-out user's token still works for `GET /me` | Working as designed: logout revokes refresh tokens only. Supabase has no access-token revocation, so a live JWT verifies until it expires (default ~1h). Use `DELETE /me` for immediate lockout (soft delete bans + tombstones) |
 | Login returns 403 "This account has been deleted" | Working as designed: the account was soft-deleted (`DELETE /me` bans the auth identity + tombstones the profile; ADR-0003). The data still exists — this is not a bug to fix |
 | `DELETE /me` returns 503 | A Supabase write failed mid-delete (the order is deliberate: revoke → ban → tombstone; failure after the ban fails closed — login already blocked). Retry the call: every write is idempotent |
 | `python -m app.admin` calls fail with "Forbidden use of secret API key in browser" | The Supabase gateway blocks secret-key calls from browser-like user agents. The CLI uses plain `httpx` (not a browser UA), so this shouldn't happen; if it does, check you're running the CLI from the repo, not through some browser-based tool |

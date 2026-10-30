@@ -75,6 +75,14 @@ def _deleted() -> HTTPException:
     return HTTPException(status_code=403, detail="This account has been deleted")
 
 
+def _is_banned(exc: supabase.SupabaseError) -> bool:
+    """Supabase refuses banned (soft-deleted) users with user_banned.
+
+    Shared by login and logout so one condition speaks one language.
+    """
+    return exc.error_code == "user_banned"
+
+
 @router.post(
     "/auth/register",
     status_code=201,
@@ -111,7 +119,7 @@ def login(payload: LoginRequest) -> LoginResponse:
             raise HTTPException(status_code=503, detail=exc.message) from exc
         # A soft-deleted user: Supabase bans before verifying the
         # password, with a distinguishable error_code (ADR-0003).
-        if exc.error_code == "user_banned":
+        if _is_banned(exc):
             raise _deleted() from exc
         # Supabase returns 400 (or 422) for both unknown emails and wrong
         # passwords; we don't distinguish to avoid account enumeration
@@ -132,6 +140,30 @@ def me(session: service.Session = Depends(verified_session)) -> UserOut:
     except supabase.SupabaseError as exc:
         raise HTTPException(status_code=503, detail=exc.message) from exc
     return UserOut(id=session.user_id, email=session.email, name=profile.get("name"))
+
+
+@router.post(
+    "/auth/logout",
+    status_code=204,
+    summary="Log out: revoke every session for the caller",
+    description=(
+        "Revokes all refresh tokens (scope=global), so no new access tokens "
+        "can be minted from any of the caller's sessions. The current access "
+        "token is NOT invalidated: Supabase has no access-token revocation, "
+        "so it keeps verifying until it expires. Idempotent — calling it "
+        "again is a no-op that still returns 204."
+    ),
+)
+def logout(session: service.Session = Depends(verified_session)):
+    try:
+        service.logout(session)
+    except service.AccountDeleted as exc:
+        raise _deleted() from exc
+    except supabase.SupabaseError as exc:
+        if _is_banned(exc):
+            raise _deleted() from exc
+        raise HTTPException(status_code=503, detail=exc.message) from exc
+    return Response(status_code=204)
 
 
 @router.delete(

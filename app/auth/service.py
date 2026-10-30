@@ -70,6 +70,29 @@ def active_profile(user_id: str) -> dict:
     return profile or {}
 
 
+def logout(session: Session) -> None:
+    """Log the caller out: revoke every session (scope=global).
+
+    Kills all refresh tokens, so no new access tokens can be minted;
+    the caller's current access token keeps verifying until it expires
+    (Supabase has no access-token revocation).
+
+    A repeat logout is not an error: Supabase answers 403
+    session_not_found once the session is gone, which is the desired
+    end state. A tombstoned caller raises AccountDeleted — deleted
+    users can't act (ADR-0003), and their logout would fail upstream
+    anyway because soft delete already revoked their sessions.
+    """
+    active_profile(session.user_id)
+
+    try:
+        supabase.revoke_sessions(session.token)
+    except supabase.SupabaseError as exc:
+        if exc.error_code == "session_not_found":
+            return
+        raise
+
+
 def soft_delete_user(session: Session) -> None:
     """Soft delete the caller (ADR-0003): revoke sessions, ban, tombstone.
 

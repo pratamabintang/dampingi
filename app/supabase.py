@@ -146,7 +146,11 @@ def revoke_sessions(user_token: str) -> None:
     """Revoke every refresh token for the token's user (scope=global).
 
     Uses the user's own access token (auth, not admin) — this is the
-    standard logout endpoint. Idempotent: 204 even with no sessions.
+    standard logout endpoint. Note the current access token stays valid
+    until it expires; Supabase has no access-token revocation.
+
+    Raises SupabaseError(403, error_code="session_not_found") when the
+    session was already revoked (a repeat logout).
     """
     resp = _request(
         httpx.post,
@@ -160,6 +164,22 @@ def revoke_sessions(user_token: str) -> None:
     )
     if resp.status_code >= 400:
         raise _error_from_response(resp)
+
+
+def refresh_grant(refresh_token: str) -> httpx.Response:
+    """Attempt a refresh-token grant; returns the raw response.
+
+    Tests use it to observe session revocation (the API never exposes
+    refresh tokens). Status >= 400 means the session is dead.
+    """
+    return _request(
+        httpx.post,
+        f"{settings.supabase_url}/auth/v1/token",
+        params={"grant_type": "refresh_token"},
+        json={"refresh_token": refresh_token},
+        headers=supabase_auth_http(),
+        timeout=TIMEOUT,
+    )
 
 
 def _utc_now_iso() -> str:
