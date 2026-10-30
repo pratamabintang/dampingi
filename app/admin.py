@@ -74,8 +74,14 @@ def delete_users(users: List[dict], log: Callable[[str], None] = print) -> int:
 def cmd_status(_args) -> int:
     users = all_user_ids()
     leaked = [u for u in users if is_test_email(u.get("email"))]
+    # Soft-deleted (ADR-0003): the auth user carries banned_until (the
+    # tombstone itself lives on profiles). Test-hygiene view: a deleted
+    # test user is inert but still occupies its email (register would
+    # 409), so purge must still hard-delete it.
+    banned = [u for u in users if u.get("banned_until")]
     print(f"total users:    {len(users)}")
     print(f"test users:    {len(leaked)}  (patterns: {', '.join(TEST_EMAIL_PATTERNS)})")
+    print(f"deleted users:  {len(banned)}  (soft-deleted; purge removes test-pattern ones)")
     print(f"other users:   {len(users) - len(leaked)}")
     if leaked:
         print("\nleaked test users:")

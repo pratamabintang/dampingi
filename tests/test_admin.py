@@ -36,6 +36,23 @@ def test_purge_deletes_leaked_test_users(client, supabase_env):
     assert not remaining, "test-pattern user survived the sweep"
 
 
+def test_purge_deletes_soft_deleted_test_users(client, supabase_env):
+    """A soft-deleted (banned + tombstoned) test user is inert but still
+    occupies its email; purge must hard-delete it (ADR-0003)."""
+    from app import admin, supabase
+
+    email = f"pytest.dead{uuid.uuid4().hex[:12]}@gmail.com"
+    body = supabase.signup(name="Dead Walk", email=email, password="Sup3rSecure!")
+    user_id = body["user"]["id"]
+    supabase.ban_user(user_id)
+    assert supabase.tombstone_profile(user_id)
+
+    leaked = [u for u in admin.find_leaked_users() if u.get("id") == user_id]
+    assert leaked, "soft-deleted test user not detected as leaked"
+    assert admin.delete_users(leaked, log=lambda _msg: None) == 1
+    assert not [u for u in admin.all_user_ids() if u.get("id") == user_id]
+
+
 def test_purge_leaves_real_users_alone(client, supabase_env):
     """The default purge must never touch users outside the patterns."""
     from app import admin

@@ -13,6 +13,9 @@ from app.config import supabase_auth_http, supabase_service_http, settings
 
 TIMEOUT = 10.0
 
+# Soft delete (ADR-0003): 100 years, the documented Supabase ban example.
+BAN_DURATION = "876000h"
+
 
 class SupabaseError(Exception):
     """Raised when Supabase does not answer 2xx."""
@@ -81,7 +84,7 @@ def login(email: str, password: str) -> dict:
 
 
 def fetch_profile(user_id: str) -> Optional[dict]:
-    """Read a profiles row via PostgREST (`columns=user_id,name`).
+    """Read a profiles row via PostgREST (`columns=user_id,name,deleted_at`).
 
     Returns None when no row exists for the user (e.g. the setup trigger
     was not installed yet), rather than raising.
@@ -89,7 +92,7 @@ def fetch_profile(user_id: str) -> Optional[dict]:
     resp = _request(
         httpx.get,
         f"{settings.supabase_url}/rest/v1/profiles",
-        params={"user_id": f"eq.{user_id}", "select": "user_id,name"},
+        params={"user_id": f"eq.{user_id}", "select": "user_id,name,deleted_at"},
         headers=supabase_service_http(),
         timeout=TIMEOUT,
     )
@@ -97,6 +100,73 @@ def fetch_profile(user_id: str) -> Optional[dict]:
         raise _error_from_response(resp)
     rows = resp.json()
     return rows[0] if rows else None
+
+
+def tombstone_profile(user_id: str) -> bool:
+    """Set profiles.deleted_at (the soft-delete tombstone; ADR-0003).
+
+    Idempotent: PATCHing again is a no-op (the column is not in the
+    body — the DB default for `now()` is not used; we send it). Returns
+    True when the row was updated.
+    """
+    resp = _request(
+        httpx.patch,
+        f"{settings.supabase_url}/rest/v1/profiles",
+        params={"user_id": f"eq.{user_id}"},
+        headers=supabase_service_http(),
+        json={"deleted_at": _utc_now_iso()},
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+    return resp.status_code < 300
+
+
+def ban_user(user_id: str) -> dict:
+    """Ban the auth user for 100 years (soft delete, auth half; ADR-0003).
+
+    Blocks login AND refresh-token grants (Supabase refuses banned users
+    before verifying credentials); live access tokens still validate
+    until expiry — revoke_sessions() is the companion call. Idempotent:
+    re-banning an already-banned user just re-sets banned_until.
+    """
+    resp = _request(
+        httpx.put,
+        f"{settings.supabase_url}/auth/v1/admin/users/{user_id}",
+        headers=supabase_service_http(),
+        json={"ban_duration": BAN_DURATION},
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+    return resp.json()
+
+
+def revoke_sessions(user_token: str) -> None:
+    """Revoke every refresh token for the token's user (scope=global).
+
+    Uses the user's own access token (auth, not admin) — this is the
+    standard logout endpoint. Idempotent: 204 even with no sessions.
+    """
+    resp = _request(
+        httpx.post,
+        f"{settings.supabase_url}/auth/v1/logout",
+        params={"scope": "global"},
+        headers={
+            "apikey": settings.supabase_publishable_key,
+            "Authorization": f"Bearer {user_token}",
+        },
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+
+
+def _utc_now_iso() -> str:
+    """UTC timestamp string, Postgres-timestamptz-parseable."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 def admin_list_users(page: int = 1, per_page: int = 100) -> tuple:

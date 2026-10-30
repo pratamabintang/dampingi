@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Optional
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -124,6 +124,12 @@ def login(payload: LoginRequest) -> LoginResponse:
     except supabase.SupabaseError as exc:
         if exc.status == 503:
             raise HTTPException(status_code=503, detail=exc.message) from exc
+        # A soft-deleted user: Supabase bans before verifying the
+        # password, with a distinguishable error_code (ADR-0003).
+        if exc.error_code == "user_banned":
+            raise HTTPException(
+                status_code=403, detail="This account has been deleted"
+            ) from exc
         # Supabase returns 400 (or 422) for both unknown emails and wrong
         # passwords; we don't distinguish to avoid account enumeration
         raise HTTPException(
@@ -153,7 +159,9 @@ def verified_claims(
     """Dependency: verify a Supabase-issued access token locally.
 
     Raises 401 when the token is missing, malformed, expired, signed by
-    an unknown key, or issued by another project.
+    an unknown key, or issued by another project. The returned dict
+    carries the verified claims plus the raw token under "_token" (used
+    by delete-me to revoke the session it arrived on).
     """
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -179,6 +187,7 @@ def verified_claims(
         ) from exc
     except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+    claims["_token"] = token
     return claims
 
 
@@ -193,8 +202,56 @@ def me(claims: dict = Depends(verified_claims)) -> UserOut:
         profile = supabase.fetch_profile(user_id)
     except supabase.SupabaseError as exc:
         raise HTTPException(status_code=503, detail=exc.message) from exc
+    if profile and profile.get("deleted_at"):
+        # Deleted users can't act (ADR-0003): the tombstone check, not
+        # token expiry, is what stops a still-valid JWT from working.
+        raise HTTPException(status_code=403, detail="This account has been deleted")
     return UserOut(
         id=user_id,
         email=claims.get("email", ""),
         name=(profile or {}).get("name"),
     )
+
+
+@router.delete(
+    "/me",
+    status_code=204,
+    summary="Soft-delete the caller's account (data is retained)",
+)
+def delete_me(claims: dict = Depends(verified_claims)):
+    """Soft delete (ADR-0003): ban the auth identity, tombstone the
+    Profile, revoke sessions. No row is destroyed.
+
+    Write order is deliberate — revoke, ban, then tombstone. The logout
+    must come first: Supabase rejects the logout of a *banned* user's
+    token ("User is banned"), so it can only run pre-ban. Ban-first
+    ordering (logout after ban) fails on every call. The ban then blocks
+    login AND refresh grants; the tombstone last records the deletion in
+    our data layer. A crash between writes fails closed on login (the
+    dangerous boundary) from the ban onward; the whole call is
+    idempotent, so a retry after 503 completes it.
+    """
+    user_id = claims["sub"]
+
+    # Already deleted? Idempotent re-delete: nothing left to do.
+    try:
+        profile = supabase.fetch_profile(user_id)
+    except supabase.SupabaseError as exc:
+        raise HTTPException(status_code=503, detail=exc.message) from exc
+    if profile and profile.get("deleted_at"):
+        raise HTTPException(status_code=403, detail="This account has been deleted")
+
+    try:
+        # 1. Revoke refresh tokens (scope=global), with the caller's own
+        #    still-valid token — impossible after the ban, hence first.
+        #    Also keeps sessions dead through any future restore.
+        supabase.revoke_sessions(claims["_token"])
+        # 2. Ban: Supabase itself refuses login + refresh for this user.
+        supabase.ban_user(user_id)
+        # 3. Tombstone: our data layer's record of deletion.
+        supabase.tombstone_profile(user_id)
+    except supabase.SupabaseError as exc:
+        # Partial delete is safe by construction: whatever step failed,
+        # login is blocked from step 2 onward; retry completes the rest.
+        raise HTTPException(status_code=503, detail=exc.message) from exc
+    return Response(status_code=204)

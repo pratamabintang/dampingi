@@ -37,8 +37,12 @@ The signup flow sends the user's name as signup metadata; the trigger below copi
 create table public.profiles (
   user_id uuid primary key references auth.users (id) on delete cascade,
   name text not null,
+  deleted_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- Soft-delete tombstone (ADR-0003): NULL = active; set only by the app
+-- (never by the DB). "Deleting" a user = Supabase ban + this timestamp.
 
 -- No policies on purpose: only the service_role/secret key
 -- (used by the app's server-side profile reads, and by tests)
@@ -65,6 +69,8 @@ create trigger on_user_created
 ```
 
 - `on delete cascade`: deleting an auth user (tests do this in teardown) removes the profile too.
+- **Existing projects** (created before soft delete): add the tombstone column with
+  `alter table public.profiles add column if not exists deleted_at timestamptz;`
 - If you run this after creating some users, backfill them with:
   `insert into public.profiles (user_id, name) select id, coalesce(raw_user_meta_data ->> 'name', '') from auth.users on conflict do nothing;`
 
@@ -143,5 +149,7 @@ A run that ends nonzero can still have swept successfully — the sweep never tu
 | Register fails with a password policy error | Supabase enforces a minimum length (default 8); the app pre-validates to match |
 | `/me` always 401 with "no trusted signing key matched" | Project still uses the legacy JWT secret (step 5) |
 | 409 on register of a brand-new email | That Gmail already registered in this project (a previous test run that crashed before cleanup, for example) — delete it from **Authentication → Users** |
-| Tests fail with `{"detail":"Request rate limit reached"}` (429) but pass when rerun after a pause | Supabase throttles the Auth API per IP. Running the live suite twice back-to-back can trip it. Wait a minute (or run `python -m app.admin status` — it works during the window) and rerun; a red run still sweeps its users |
+| Tests fail with `{"detail":"Request rate limit reached"}` (429) but pass when rerun after a pause | Supabase throttles the Auth API per IP. The live suite makes ~70 auth-API calls per run (each delete test adds signup + logout + ban + tombstone), so back-to-back runs trip it. Wait ~5 minutes and rerun; a red run still sweeps its users |
+| Login returns 403 "This account has been deleted" | Working as designed: the account was soft-deleted (`DELETE /me` bans the auth identity + tombstones the profile; ADR-0003). The data still exists — this is not a bug to fix |
+| `DELETE /me` returns 503 | A Supabase write failed mid-delete (the order is deliberate: revoke → ban → tombstone; failure after the ban fails closed — login already blocked). Retry the call: every write is idempotent |
 | `python -m app.admin` calls fail with "Forbidden use of secret API key in browser" | The Supabase gateway blocks secret-key calls from browser-like user agents. The CLI uses plain `httpx` (not a browser UA), so this shouldn't happen; if it does, check you're running the CLI from the repo, not through some browser-based tool |
