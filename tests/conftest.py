@@ -142,12 +142,25 @@ def pytest_sessionfinish(session, exitstatus):
 def register(client, unique_email, tracked_users):
     """Register a fresh user and return (email, user dict, access_token)."""
 
-    def _register(name: str = "Test User", password: str = "Sup3rSecure!"):
+    def _register(
+        name: str = "Test User",
+        password: str = "Sup3rSecure!",
+        role: str = "mother",
+    ):
         email = unique_email()
         resp = client.post(
             "/auth/register",
-            json={"name": name, "email": email, "password": password},
+            json={"name": name, "email": email, "password": password, "role": role},
         )
+        # A 429 mid-run is Supabase's per-IP throttle, not a code defect.
+        # Fail with the remedy in the message instead of a bare assert.
+        if resp.status_code == 400 and "rate limit" in resp.text.lower():
+            pytest.fail(
+                "Supabase rate limit hit (per-IP Auth throttle). The suite "
+                "makes ~110 auth calls per run, so back-to-back runs trip it. "
+                "Wait ~5 minutes and rerun (see docs/supabase-setup.md, "
+                "Troubleshooting)."
+            )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         tracked_users.append(body["user"]["id"])

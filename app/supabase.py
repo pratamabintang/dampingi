@@ -26,6 +26,15 @@ class SupabaseError(Exception):
         self.message = message
         self.error_code = error_code
 
+    @property
+    def is_transport(self) -> bool:
+        """True when we never got a usable answer (unreachable, timeout).
+
+        Lets the logic layer distinguish "upstream is down" from "upstream
+        said no" without doing HTTP status arithmetic (ADR-0004).
+        """
+        return self.status == 503 and self.error_code is None
+
 
 def _error_from_response(resp: httpx.Response) -> SupabaseError:
     error_code = None
@@ -47,11 +56,13 @@ def _request(func, *args, **kwargs) -> httpx.Response:
         raise SupabaseError(503, f"Supabase unreachable: {exc}") from exc
 
 
-def signup(name: str, email: str, password: str) -> dict:
-    """Create a Supabase auth user with `name` in signup metadata.
+def signup(name: str, email: str, password: str, role: str) -> dict:
+    """Create a Supabase auth user with `name` and `role` in metadata.
 
-    Relies on a database trigger (docs/supabase-setup.md) copying the
-    name from raw_user_meta_data into a `profiles` row.
+    Relies on a database trigger (docs/supabase-setup.md) copying both
+    from raw_user_meta_data into a `profiles` row. The role lands in
+    user_metadata too — user-writable, so never authorize from it
+    (ADR-0005); the trigger's profiles row is the source of truth.
 
     Returns the Supabase response body: {user, session} (session is None
     when email confirmation is still required).
@@ -60,7 +71,11 @@ def signup(name: str, email: str, password: str) -> dict:
         httpx.post,
         f"{settings.supabase_url}/auth/v1/signup",
         headers=supabase_auth_http(),
-        json={"email": email, "password": password, "data": {"name": name}},
+        json={
+            "email": email,
+            "password": password,
+            "data": {"name": name, "role": role},
+        },
         timeout=TIMEOUT,
     )
     if resp.status_code >= 400:
@@ -83,8 +98,52 @@ def login(email: str, password: str) -> dict:
     return resp.json()
 
 
+def update_profile_name(user_id: str, name: str) -> dict:
+    """Update profiles.name via PostgREST (server-side, secret key).
+
+    Returns the updated row. Raises SupabaseError when no row matched:
+    a PATCH that wrote nothing must not report success.
+    """
+    resp = _request(
+        httpx.patch,
+        f"{settings.supabase_url}/rest/v1/profiles",
+        params={"user_id": f"eq.{user_id}", "select": "user_id,name,deleted_at,role"},
+        headers={**supabase_service_http(), "Prefer": "return=representation"},
+        json={"name": name},
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+    rows = resp.json()
+    if not rows:
+        raise SupabaseError(404, f"No profile row for user {user_id}")
+    return rows[0]
+
+
+def update_password(user_token: str, new_password: str) -> None:
+    """Set a new password for the token's user (PUT /auth/v1/user).
+
+    Supabase performs NO check of the old password here — the caller
+    must verify it first (service.change_password does, by attempting a
+    login). Does not revoke existing sessions; the service does that.
+    """
+    resp = _request(
+        httpx.put,
+        f"{settings.supabase_url}/auth/v1/user",
+        headers={
+            "apikey": settings.supabase_publishable_key,
+            "Authorization": f"Bearer {user_token}",
+            "Content-Type": "application/json",
+        },
+        json={"password": new_password},
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+
+
 def fetch_profile(user_id: str) -> Optional[dict]:
-    """Read a profiles row via PostgREST (`columns=user_id,name,deleted_at`).
+    """Read a profiles row via PostgREST (`columns=user_id,name,deleted_at,role`).
 
     Returns None when no row exists for the user (e.g. the setup trigger
     was not installed yet), rather than raising.
@@ -92,7 +151,10 @@ def fetch_profile(user_id: str) -> Optional[dict]:
     resp = _request(
         httpx.get,
         f"{settings.supabase_url}/rest/v1/profiles",
-        params={"user_id": f"eq.{user_id}", "select": "user_id,name,deleted_at"},
+        params={
+            "user_id": f"eq.{user_id}",
+            "select": "user_id,name,deleted_at,role",
+        },
         headers=supabase_service_http(),
         timeout=TIMEOUT,
     )
@@ -142,12 +204,17 @@ def ban_user(user_id: str) -> dict:
     return resp.json()
 
 
-def revoke_sessions(user_token: str) -> None:
-    """Revoke every refresh token for the token's user (scope=global).
+def revoke_sessions(user_token: str, scope: str = "global") -> None:
+    """Revoke refresh tokens for the token's user.
 
     Uses the user's own access token (auth, not admin) — this is the
     standard logout endpoint. Note the current access token stays valid
     until it expires; Supabase has no access-token revocation.
+
+    scope="global" (default) kills every session the user holds;
+    scope="local" kills only the session the token belongs to. Use
+    "local" when another session must survive (change_password revokes
+    its throwaway verification session this way).
 
     Raises SupabaseError(403, error_code="session_not_found") when the
     session was already revoked (a repeat logout).
@@ -155,7 +222,7 @@ def revoke_sessions(user_token: str) -> None:
     resp = _request(
         httpx.post,
         f"{settings.supabase_url}/auth/v1/logout",
-        params={"scope": "global"},
+        params={"scope": scope},
         headers={
             "apikey": settings.supabase_publishable_key,
             "Authorization": f"Bearer {user_token}",
@@ -164,6 +231,29 @@ def revoke_sessions(user_token: str) -> None:
     )
     if resp.status_code >= 400:
         raise _error_from_response(resp)
+
+
+def update_own_metadata(user_token: str, metadata: dict) -> dict:
+    """Overwrite the caller's user_metadata (PUT /auth/v1/user).
+
+    Exposed because the app must never *rely* on it: metadata is
+    user-writable with the publishable key. Tests use it to prove that a
+    forged `role` claim does not change what the API reports (ADR-0005).
+    """
+    resp = _request(
+        httpx.put,
+        f"{settings.supabase_url}/auth/v1/user",
+        headers={
+            "apikey": settings.supabase_publishable_key,
+            "Authorization": f"Bearer {user_token}",
+            "Content-Type": "application/json",
+        },
+        json={"data": metadata},
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+    return resp.json()
 
 
 def refresh_grant(refresh_token: str) -> httpx.Response:

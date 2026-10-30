@@ -1,6 +1,7 @@
 # dampingi
 
-FastAPI backend backed by Supabase Auth (register / login / `/me`).
+FastAPI backend backed by Supabase Auth (register / login / `/me` /
+logout / password change).
 
 Deployed on Render (see `render.yaml`); identity is delegated to
 Supabase Auth — design decisions in the parent repo's `docs/adr/`.
@@ -19,6 +20,7 @@ app/
     schemas.py    the data contracts: custom types, requests, responses
 tests/          live integration suite (talks to the real project)
 docs/           supabase-setup.md — project setup + troubleshooting
+  migrations/   SQL to run in the Supabase dashboard SQL editor
 ```
 
 Each domain model gets its own folder under `app/` with this logic /

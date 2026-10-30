@@ -16,10 +16,12 @@ from jwt import PyJWKClient
 from app import supabase
 from app.auth import service
 from app.auth.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
     RegisterResponse,
+    UpdateMeRequest,
     UserOut,
 )
 from app.config import settings
@@ -75,6 +77,23 @@ def _deleted() -> HTTPException:
     return HTTPException(status_code=403, detail="This account has been deleted")
 
 
+def _handle_auth_errors(func, *args):
+    """Run a service call, mapping domain/transport errors to HTTP.
+
+    One place owns the mapping ADR-0004 assigns to this layer, so no
+    endpoint can forget a branch (each of five handlers used to repeat
+    this pair).
+    """
+    try:
+        return func(*args)
+    except service.AccountDeleted as exc:
+        raise _deleted() from exc
+    except supabase.SupabaseError as exc:
+        if _is_banned(exc):
+            raise _deleted() from exc
+        raise HTTPException(status_code=503, detail=exc.message) from exc
+
+
 def _is_banned(exc: supabase.SupabaseError) -> bool:
     """Supabase refuses banned (soft-deleted) users with user_banned.
 
@@ -87,11 +106,13 @@ def _is_banned(exc: supabase.SupabaseError) -> bool:
     "/auth/register",
     status_code=201,
     response_model=RegisterResponse,
-    summary="Register with name, Gmail address, and password",
+    summary="Register with name, Gmail address, password, and role",
 )
 def register(payload: RegisterRequest) -> RegisterResponse:
     try:
-        account = service.register_user(payload.name, payload.email, payload.password)
+        account = service.register_user(
+            payload.name, payload.email, payload.password, payload.role.value
+        )
     except supabase.SupabaseError as exc:
         if exc.status == 503:
             raise HTTPException(status_code=503, detail=exc.message) from exc
@@ -130,16 +151,11 @@ def login(payload: LoginRequest) -> LoginResponse:
 @router.get(
     "/me",
     response_model=UserOut,
-    summary="The registered name + email of the caller",
+    summary="The registered name, email, and role of the caller",
 )
 def me(session: service.Session = Depends(verified_session)) -> UserOut:
-    try:
-        profile = service.active_profile(session.user_id)
-    except service.AccountDeleted as exc:
-        raise _deleted() from exc
-    except supabase.SupabaseError as exc:
-        raise HTTPException(status_code=503, detail=exc.message) from exc
-    return UserOut(id=session.user_id, email=session.email, name=profile.get("name"))
+    profile = _handle_auth_errors(service.active_profile, session.user_id)
+    return service.profile_out(session, profile)
 
 
 @router.post(
@@ -155,16 +171,63 @@ def me(session: service.Session = Depends(verified_session)) -> UserOut:
     ),
 )
 def logout(session: service.Session = Depends(verified_session)):
+    _handle_auth_errors(service.logout, session)
+    return Response(status_code=204)
+
+
+@router.patch(
+    "/me",
+    response_model=UserOut,
+    summary="Change the caller's name (role is immutable)",
+    description=(
+        "The only editable Profile field is the name. Sending any other "
+        "field — including `role` — is rejected with 422: a silently "
+        "ignored role would read as success to the caller (ADR-0005)."
+    ),
+)
+def update_me(
+    payload: UpdateMeRequest, session: service.Session = Depends(verified_session)
+) -> UserOut:
+    return _handle_auth_errors(service.update_name, session, payload.name)
+
+
+@router.post(
+    "/auth/password",
+    status_code=204,
+    summary="Change the caller's password (current password required)",
+    description=(
+        "Verifies `current_password` by attempting a login, then sets "
+        "`new_password` and revokes every session — the caller must log in "
+        "again. Other devices' live access tokens keep working until they "
+        "expire (Supabase has no access-token revocation)."
+    ),
+)
+def change_password(
+    payload: ChangePasswordRequest,
+    session: service.Session = Depends(verified_session),
+):
     try:
-        service.logout(session)
+        service.change_password(
+            session, payload.current_password, payload.new_password
+        )
     except service.AccountDeleted as exc:
         raise _deleted() from exc
+    except service.CurrentPasswordIncorrect as exc:
+        # 400, not 401: 401 means the bearer token failed verified_session
+        raise HTTPException(status_code=400, detail="Current password is incorrect") from exc
+    except service.PasswordUnchanged as exc:
+        raise HTTPException(
+            status_code=400, detail="New password must differ from the current one"
+        ) from exc
     except supabase.SupabaseError as exc:
+        # Reached when the verification login itself is refused upstream:
+        # a banned-but-not-tombstoned caller gets user_banned here (the
+        # tombstone check already ran, but an admin ban may exist without
+        # one). Everything else is an upstream failure.
         if _is_banned(exc):
             raise _deleted() from exc
         raise HTTPException(status_code=503, detail=exc.message) from exc
     return Response(status_code=204)
-
 
 @router.delete(
     "/me",

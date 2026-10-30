@@ -24,7 +24,9 @@ def test_purge_deletes_leaked_test_users(client, supabase_env):
     from app import supabase
 
     email = f"pytest.swept{uuid.uuid4().hex[:12]}@gmail.com"
-    body = supabase.signup(name="Sweep Me", email=email, password="Sup3rSecure!")
+    body = supabase.signup(
+        name="Sweep Me", email=email, password="Sup3rSecure!", role="mother"
+    )
     user_id = body["user"]["id"]
     leaked_before = [u for u in admin.find_leaked_users() if u.get("id") == user_id]
     assert leaked_before, "freshly created test-pattern user not detected as leaked"
@@ -42,7 +44,9 @@ def test_purge_deletes_soft_deleted_test_users(client, supabase_env):
     from app import admin, supabase
 
     email = f"pytest.dead{uuid.uuid4().hex[:12]}@gmail.com"
-    body = supabase.signup(name="Dead Walk", email=email, password="Sup3rSecure!")
+    body = supabase.signup(
+        name="Dead Walk", email=email, password="Sup3rSecure!", role="mother"
+    )
     user_id = body["user"]["id"]
     supabase.ban_user(user_id)
     assert supabase.tombstone_profile(user_id)

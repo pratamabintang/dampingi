@@ -14,6 +14,14 @@ class AccountDeleted(Exception):
     """The account is soft-deleted (ADR-0003): no login, no actions."""
 
 
+class CurrentPasswordIncorrect(Exception):
+    """The caller-supplied current password did not verify."""
+
+
+class PasswordUnchanged(Exception):
+    """The new password is the same as the current one."""
+
+
 @dataclass(frozen=True)
 class Session:
     """The caller's verified identity, plus the raw token (used to
@@ -33,12 +41,12 @@ class Account:
     profile: dict
 
 
-def register_user(name: str, email: str, password: str) -> Account:
+def register_user(name: str, email: str, password: str, role: str) -> Account:
     """Register; returns the created auth user, access token, profile.
 
     Raises SupabaseError (409-conflict etc.) for the router to map.
     """
-    body = supabase.signup(name, email, password)
+    body = supabase.signup(name, email, password, role)
     user = body.get("user") or {}
     # Signup responses come in two shapes: flat (access_token at top
     # level — current API) or {user, session}. Handle both; the token
@@ -100,13 +108,25 @@ def soft_delete_user(session: Session) -> None:
     rejects a banned user's logout call. The whole call is idempotent;
     a retry after a partial failure completes it.
     """
-    profile = supabase.fetch_profile(session.user_id)
-    if profile and profile.get("deleted_at"):
-        raise AccountDeleted()
+    active_profile(session.user_id)
 
     supabase.revoke_sessions(session.token)
     supabase.ban_user(session.user_id)
     supabase.tombstone_profile(session.user_id)
+
+
+def profile_out(session: Session, profile: dict) -> UserOut:
+    """The API shape of a user, from a verified Session + Profile row.
+
+    Every user-facing response goes through here, so `role` cannot be
+    forgotten by one endpoint (it was: GET /me built UserOut by hand).
+    """
+    return UserOut(
+        id=session.user_id,
+        email=session.email,
+        name=profile.get("name"),
+        role=profile.get("role"),
+    )
 
 
 def user_out(account: Account) -> UserOut:
@@ -115,4 +135,68 @@ def user_out(account: Account) -> UserOut:
         id=account.user.get("id", ""),
         email=account.user.get("email", ""),
         name=account.profile.get("name"),
+        role=account.profile.get("role"),
     )
+
+
+def update_name(session: Session, name: str) -> UserOut:
+    """Change the caller's name; returns the updated Profile shape.
+
+    Raises AccountDeleted for a tombstoned caller (ADR-0003 invariant).
+    """
+    profile = active_profile(session.user_id)
+    updated = supabase.update_profile_name(session.user_id, name)
+    return profile_out(session, {**profile, **updated})
+
+
+def change_password(session: Session, current_password: str, new_password: str) -> None:
+    """Change the caller's password, verifying the current one first.
+
+    Supabase's PUT /auth/v1/user accepts a new password without checking
+    the old one, so a stolen token would be enough to seize the account.
+    We verify by attempting a login; that also mints a throwaway session
+    whose refresh token we revoke immediately.
+
+    On success every session is revoked (scope=global): a password change
+    normally means someone else may know the old one. The caller must log
+    in again.
+
+    Raises AccountDeleted, CurrentPasswordIncorrect, PasswordUnchanged,
+    or SupabaseError.
+    """
+    active_profile(session.user_id)
+
+    try:
+        throwaway = supabase.login(session.email, current_password)
+    except supabase.SupabaseError as exc:
+        # The credential did not verify, so nothing may change. But a
+        # throttled or unreachable upstream is NOT a wrong password:
+        # only a 4xx that isn't 429 means "you typed it wrong".
+        if exc.is_transport or exc.status == 429:
+            raise
+        raise CurrentPasswordIncorrect() from exc
+
+    # Don't leave the verification session alive. scope=local on purpose:
+    # scope=global here would kill the caller's own session too, and the
+    # password update below would fail with session_not_found.
+    _revoke_quietly(throwaway.get("access_token", ""), scope="local")
+
+    # Only after the credential verifies can we say anything about the
+    # new password (a wrong current password must win the error race).
+    if current_password == new_password:
+        raise PasswordUnchanged()
+
+    supabase.update_password(session.token, new_password)
+    supabase.revoke_sessions(session.token)
+
+
+def _revoke_quietly(user_token: str, scope: str) -> None:
+    """Best-effort session revoke: cleanup must not fail the operation.
+
+    The throwaway verification session is a courtesy, not a guarantee —
+    the global revoke that follows a successful change covers it anyway.
+    """
+    try:
+        supabase.revoke_sessions(user_token, scope=scope)
+    except supabase.SupabaseError:
+        pass
