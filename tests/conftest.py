@@ -108,6 +108,36 @@ def tracked_users() -> Iterator[list]:
         assert resp.status_code < 300, f"cleanup failed for {user_id}: {resp.text}"
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Post-run sweep: delete leaked test users.
+
+    Per-test teardown (tracked_users) deletes the users a test knows it
+    created. It misses users created just before a hard failure (the
+    register-before-track window) or a keyboard interrupt. This sweep
+    runs after every session and clears anything left matching the test
+    patterns, so a failed run never poisons the next one.
+
+    Silently skipped when credentials aren't configured (the whole
+    suite skips anyway) or when run with -p no:terminalreporter.
+    """
+    missing = _missing_keys()
+    if missing:
+        return
+    try:
+        import admin
+        import supabase
+    except Exception:
+        return
+    try:
+        leaked = admin.find_leaked_users()
+        if leaked:
+            admin.delete_users(leaked, log=lambda _msg: None)
+    except supabase.SupabaseError:
+        # Sweep must never turn a green run red; admin.py purge is the
+        # manual remedy when this happens.
+        pass
+
+
 @pytest.fixture
 def register(client, unique_email, tracked_users):
     """Register a fresh user and return (email, user dict, access_token)."""

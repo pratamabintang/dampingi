@@ -115,6 +115,24 @@ Invoke-RestMethod -Uri "http://localhost:8000/me" -Headers @{ Authorization = "B
 # => { id, email, name }
 ```
 
+## 8. Test-user hygiene (admin CLI)
+
+Test users are cleaned up in three layers:
+
+1. **Per-test teardown** — the `tracked_users` fixture deletes each user a test created.
+2. **Session sweep** — after every `pytest` run, `pytest_sessionfinish` deletes any user matching the test patterns (`pytest.*`, `probe.*` local parts), catching users that leaked when a run crashed between registration and teardown.
+3. **Manual CLI** — `admin.py`:
+
+```powershell
+python admin.py status   # totals + list of leaked test users
+python admin.py purge    # delete leaked test users (patterns only)
+python admin.py purge --all  # delete EVERY user (type count to confirm)
+```
+
+`purge` without flags only ever touches `pytest.*`/`probe.*` emails, so a teammate's manual test account is never deleted by accident. `--all` is unguarded by pattern but requires typing the user count.
+
+A run that ends nonzero can still have swept successfully — the sweep never turns a red run green-to-red. If a sweep itself fails (network), `python admin.py purge` is the manual remedy.
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -125,3 +143,4 @@ Invoke-RestMethod -Uri "http://localhost:8000/me" -Headers @{ Authorization = "B
 | Register fails with a password policy error | Supabase enforces a minimum length (default 8); the app pre-validates to match |
 | `/me` always 401 with "no trusted signing key matched" | Project still uses the legacy JWT secret (step 5) |
 | 409 on register of a brand-new email | That Gmail already registered in this project (a previous test run that crashed before cleanup, for example) — delete it from **Authentication → Users** |
+| `python admin.py` calls fail with "Forbidden use of secret API key in browser" | The Supabase gateway blocks secret-key calls from browser-like user agents. The CLI uses plain `httpx` (not a browser UA), so this shouldn't happen; if it does, check you're running `admin.py` from the repo, not through some browser-based tool |

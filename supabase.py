@@ -99,6 +99,26 @@ def fetch_profile(user_id: str) -> Optional[dict]:
     return rows[0] if rows else None
 
 
+def admin_list_users(page: int = 1, per_page: int = 100) -> tuple:
+    """One page of the admin user list.
+
+    Returns (users, next_page, total): next_page is None on the last
+    page; total is the project's total user count (x-total-count).
+    """
+    resp = _request(
+        httpx.get,
+        f"{settings.supabase_url}/auth/v1/admin/users",
+        params={"page": page, "per_page": per_page},
+        headers=supabase_service_http(),
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+    body = resp.json()
+    total = resp.headers.get("x-total-count")
+    return body.get("users", []), body.get("next_page"), total
+
+
 def delete_user(user_id: str) -> bool:
     """Delete an auth user via the admin API (test cleanup).
 
