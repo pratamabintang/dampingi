@@ -24,16 +24,28 @@ from app.auth.schemas import (
     UpdateMeRequest,
     UserOut,
 )
-from app.config import settings
+from app.config import get_settings
 
 router = APIRouter(tags=["auth"])
 
 _ALGORITHMS = ("ES256", "RS256", "PS256", "EdDSA")
-_issuer = f"{settings.supabase_url.rstrip('/')}/auth/v1"
 
-# Cached JWKS fetch: PyJWKClient caches keys after the first request to
-# the discovery endpoint (docs/supabase-setup.md explains the trade-off).
-_jwk_client = PyJWKClient(supabase.jwks_url(), cache_keys=True)
+# Built on first use, not at import (ADR-0006): constructing these needs
+# the project URL, and importing the app must not require credentials.
+# PyJWKClient caches keys after the first discovery fetch
+# (docs/supabase-setup.md explains the trade-off).
+_jwk_client: Optional[PyJWKClient] = None
+
+
+def _jwk() -> PyJWKClient:
+    global _jwk_client
+    if _jwk_client is None:
+        _jwk_client = PyJWKClient(supabase.jwks_url(), cache_keys=True)
+    return _jwk_client
+
+
+def _issuer() -> str:
+    return f"{get_settings().supabase_url.rstrip('/')}/auth/v1"
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -50,13 +62,13 @@ def verified_session(
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = credentials.credentials
     try:
-        signing_key = _jwk_client.get_signing_key_from_jwt(token)
+        signing_key = _jwk().get_signing_key_from_jwt(token)
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=list(_ALGORITHMS),
             audience="authenticated",
-            issuer=_issuer,
+            issuer=_issuer(),
             options={"require": ["exp", "sub"]},
         )
     except jwt.PyJWKClientError as exc:

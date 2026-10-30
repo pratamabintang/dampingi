@@ -9,12 +9,50 @@ from typing import Any, Optional
 
 import httpx
 
-from app.config import supabase_auth_http, supabase_service_http, settings
+from app.config import get_settings, supabase_auth_http, supabase_service_http
 
 TIMEOUT = 10.0
 
 # Soft delete (ADR-0003): 100 years, the documented Supabase ban example.
 BAN_DURATION = "876000h"
+
+
+# --- The seam (ADR-0006) -----------------------------------------------------
+#
+# Every call goes through one client, so a test can hand in an
+# httpx.Client backed by httpx.MockTransport and exercise this module's
+# real URL building, header assembly, and error mapping against canned
+# responses. Tests replace it with `use_client()`; the default talks to
+# the network.
+
+_client_override: Optional[httpx.Client] = None
+_default_client: Optional[httpx.Client] = None
+
+
+def _client() -> httpx.Client:
+    """The httpx client every request uses (real unless overridden)."""
+    global _default_client
+    if _client_override is not None:
+        return _client_override
+    if _default_client is None:
+        _default_client = httpx.Client(timeout=TIMEOUT)
+    return _default_client
+
+
+def use_client(client: Optional[httpx.Client]) -> None:
+    """Route requests through `client` (None restores the real network)."""
+    global _client_override
+    _client_override = client
+
+
+def _base_url() -> str:
+    """Supabase project URL, without a trailing slash."""
+    return get_settings().supabase_url.rstrip("/")
+
+
+def _publishable_key() -> str:
+    """The publishable (public) key; safe to expose, used for auth flows."""
+    return get_settings().supabase_publishable_key
 
 
 class SupabaseError(Exception):
@@ -68,8 +106,8 @@ def signup(name: str, email: str, password: str, role: str) -> dict:
     when email confirmation is still required).
     """
     resp = _request(
-        httpx.post,
-        f"{settings.supabase_url}/auth/v1/signup",
+        _client().post,
+        f"{_base_url()}/auth/v1/signup",
         headers=supabase_auth_http(),
         json={
             "email": email,
@@ -86,8 +124,8 @@ def signup(name: str, email: str, password: str, role: str) -> dict:
 def login(email: str, password: str) -> dict:
     """Password grant sign-in; returns the token response body."""
     resp = _request(
-        httpx.post,
-        f"{settings.supabase_url}/auth/v1/token",
+        _client().post,
+        f"{_base_url()}/auth/v1/token",
         params={"grant_type": "password"},
         headers=supabase_auth_http(),
         json={"email": email, "password": password},
@@ -105,8 +143,8 @@ def update_profile_name(user_id: str, name: str) -> dict:
     a PATCH that wrote nothing must not report success.
     """
     resp = _request(
-        httpx.patch,
-        f"{settings.supabase_url}/rest/v1/profiles",
+        _client().patch,
+        f"{_base_url()}/rest/v1/profiles",
         params={"user_id": f"eq.{user_id}", "select": "user_id,name,deleted_at,role"},
         headers={**supabase_service_http(), "Prefer": "return=representation"},
         json={"name": name},
@@ -128,10 +166,10 @@ def update_password(user_token: str, new_password: str) -> None:
     login). Does not revoke existing sessions; the service does that.
     """
     resp = _request(
-        httpx.put,
-        f"{settings.supabase_url}/auth/v1/user",
+        _client().put,
+        f"{_base_url()}/auth/v1/user",
         headers={
-            "apikey": settings.supabase_publishable_key,
+            "apikey": _publishable_key(),
             "Authorization": f"Bearer {user_token}",
             "Content-Type": "application/json",
         },
@@ -149,8 +187,8 @@ def fetch_profile(user_id: str) -> Optional[dict]:
     was not installed yet), rather than raising.
     """
     resp = _request(
-        httpx.get,
-        f"{settings.supabase_url}/rest/v1/profiles",
+        _client().get,
+        f"{_base_url()}/rest/v1/profiles",
         params={
             "user_id": f"eq.{user_id}",
             "select": "user_id,name,deleted_at,role",
@@ -172,8 +210,8 @@ def tombstone_profile(user_id: str) -> bool:
     True when the row was updated.
     """
     resp = _request(
-        httpx.patch,
-        f"{settings.supabase_url}/rest/v1/profiles",
+        _client().patch,
+        f"{_base_url()}/rest/v1/profiles",
         params={"user_id": f"eq.{user_id}"},
         headers=supabase_service_http(),
         json={"deleted_at": _utc_now_iso()},
@@ -193,8 +231,8 @@ def ban_user(user_id: str) -> dict:
     re-banning an already-banned user just re-sets banned_until.
     """
     resp = _request(
-        httpx.put,
-        f"{settings.supabase_url}/auth/v1/admin/users/{user_id}",
+        _client().put,
+        f"{_base_url()}/auth/v1/admin/users/{user_id}",
         headers=supabase_service_http(),
         json={"ban_duration": BAN_DURATION},
         timeout=TIMEOUT,
@@ -220,11 +258,11 @@ def revoke_sessions(user_token: str, scope: str = "global") -> None:
     session was already revoked (a repeat logout).
     """
     resp = _request(
-        httpx.post,
-        f"{settings.supabase_url}/auth/v1/logout",
+        _client().post,
+        f"{_base_url()}/auth/v1/logout",
         params={"scope": scope},
         headers={
-            "apikey": settings.supabase_publishable_key,
+            "apikey": _publishable_key(),
             "Authorization": f"Bearer {user_token}",
         },
         timeout=TIMEOUT,
@@ -241,10 +279,10 @@ def update_own_metadata(user_token: str, metadata: dict) -> dict:
     forged `role` claim does not change what the API reports (ADR-0005).
     """
     resp = _request(
-        httpx.put,
-        f"{settings.supabase_url}/auth/v1/user",
+        _client().put,
+        f"{_base_url()}/auth/v1/user",
         headers={
-            "apikey": settings.supabase_publishable_key,
+            "apikey": _publishable_key(),
             "Authorization": f"Bearer {user_token}",
             "Content-Type": "application/json",
         },
@@ -263,8 +301,8 @@ def refresh_grant(refresh_token: str) -> httpx.Response:
     refresh tokens). Status >= 400 means the session is dead.
     """
     return _request(
-        httpx.post,
-        f"{settings.supabase_url}/auth/v1/token",
+        _client().post,
+        f"{_base_url()}/auth/v1/token",
         params={"grant_type": "refresh_token"},
         json={"refresh_token": refresh_token},
         headers=supabase_auth_http(),
@@ -286,8 +324,8 @@ def admin_list_users(page: int = 1, per_page: int = 100) -> tuple:
     page; total is the project's total user count (x-total-count).
     """
     resp = _request(
-        httpx.get,
-        f"{settings.supabase_url}/auth/v1/admin/users",
+        _client().get,
+        f"{_base_url()}/auth/v1/admin/users",
         params={"page": page, "per_page": per_page},
         headers=supabase_service_http(),
         timeout=TIMEOUT,
@@ -305,8 +343,8 @@ def delete_user(user_id: str) -> bool:
     The profiles row is removed automatically by the FK cascade.
     """
     resp = _request(
-        httpx.delete,
-        f"{settings.supabase_url}/auth/v1/admin/users/{user_id}",
+        _client().delete,
+        f"{_base_url()}/auth/v1/admin/users/{user_id}",
         headers=supabase_service_http(),
         timeout=TIMEOUT,
     )
@@ -320,4 +358,4 @@ def delete_user(user_id: str) -> bool:
 
 def jwks_url() -> str:
     """Public key discovery endpoint (asymmetric signing keys)."""
-    return f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
+    return f"{_base_url()}/auth/v1/.well-known/jwks.json"

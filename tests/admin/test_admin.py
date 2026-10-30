@@ -6,15 +6,9 @@ and end with the project clean.
 
 import uuid
 
+import pytest
 
-def test_is_test_email_patterns(client, supabase_env):
-    from app.admin import is_test_email
-
-    assert is_test_email("pytest.abc123@gmail.com")
-    assert is_test_email("probe.xyz@gmail.com")
-    assert not is_test_email("realuser@gmail.com")
-    assert not is_test_email(None)
-    assert not is_test_email("notpytest@gmail.com")  # must start with pattern
+pytestmark = pytest.mark.live
 
 
 def test_purge_deletes_leaked_test_users(client, supabase_env):

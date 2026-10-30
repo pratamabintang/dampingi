@@ -1,169 +1,93 @@
-import importlib
-import os
-import sys
-import uuid
-from pathlib import Path
-from typing import Iterator
+"""Canned Supabase responses and the offline client (ADR-0006).
 
+The seam is the transport's httpx client: a test hands in a client backed
+by httpx.MockTransport, so `app/supabase.py` runs its real URL building,
+header assembly, and error mapping — only the socket is faked.
+
+Fidelity rules (ADR-0006):
+- Error bodies are hand-written; their shape is just status + error_code
+  + msg, already bounded by the code's branches. The vocabulary is capped
+  at the seven cases the code actually distinguishes — adding an eighth
+  means the code grew a branch, not that these helpers need to get
+  cleverer.
+- Success payloads must be *captured* from the real project, not invented;
+  inventing shape is how the transport bugs were missed. See
+  tests/fixtures/README.md before adding one.
+"""
+
+import httpx
 import pytest
 
-# dampingi keeps its modules in the app/ package at the repo root;
-# tests sit next to it, so the root is already importable, but make it
-# explicit so the suite works from any cwd.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-TESTS_DIR = Path(__file__).resolve().parent
-TEST_ENV_FILE = TESTS_DIR / ".env"
-
-REQUIRED_ENV = ("SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY")
-SKIP_REASON = (
-    f"live Supabase credentials not configured: create {TESTS_DIR / '.env'} "
-    f"from {TESTS_DIR / '.env.example'} (see docs/supabase-setup.md); "
-    "missing keys are auto-detected and the whole module skips"
-)
+def supabase_error(status: int, message: str, error_code: str) -> httpx.Response:
+    """A Supabase error response, in the shape the API actually uses."""
+    return httpx.Response(
+        status,
+        json={"code": status, "error_code": error_code, "msg": message},
+    )
 
 
-def _load_env_file(path: Path) -> dict:
-    """Minimal .env loader so the tests need no python-dotenv."""
-    values = {}
-    if not path.exists():
-        return values
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        values[key.strip()] = value.strip().strip("'\"")
-    return values
+def supabase_json(status: int, body) -> httpx.Response:
+    """A Supabase success response."""
+    return httpx.Response(status, json=body)
 
 
-def _missing_keys() -> list:
-    values = {}
-    for key, value in _load_env_file(TEST_ENV_FILE).items():
-        # .env.example ships empty values; they don't count as configured
-        if value:
-            values[key] = value
-    for key, value in values.items():
-        os.environ[key] = value
-    return [key for key in REQUIRED_ENV if not os.environ.get(key)]
+class Recorded:
+    """A stand-in upstream that answers by method+path and records calls."""
 
+    def __init__(self, routes: dict):
+        # routes: {(METHOD, path-suffix): response-or-callable}
+        self.routes = routes
+        self.requests: list = []
 
-_dummy_client: object = None
-
-
-@pytest.fixture(scope="session")
-def client(supabase_env):
-    """FastAPI TestClient against the real app; Supabase is really
-    called, so every test in this suite is an integration test.
-
-    Depends on supabase_env so the skip is decided BEFORE the app is
-    imported (importing it without credentials makes config exit)."""
-    global _dummy_client
-    from fastapi.testclient import TestClient
-
-    main = importlib.import_module("app.main")
-    _dummy_client = TestClient(main.app)
-    return _dummy_client
-
-
-@pytest.fixture(scope="session")
-def supabase_env():
-    missing = _missing_keys()
-    if missing:
-        pytest.skip(f"{SKIP_REASON} [{', '.join(missing)}]")
-    base_url = os.environ["SUPABASE_URL"].rstrip("/")
-    # sanity: JWKS must be reachable, otherwise /me can never work
-    import httpx
-
-    resp = httpx.get(f"{base_url}/auth/v1/.well-known/jwks.json", timeout=10)
-    if resp.status_code >= 400:
-        pytest.skip(f"JWKS discovery endpoint not reachable: {resp.status_code}")
-    return base_url
-
-
-@pytest.fixture
-def unique_email():
-    """Callable returning a fresh Gmail address each time (12 hex chars
-    make it unique), so one test can register several users."""
-    def _generate():
-        return f"pytest.{uuid.uuid4().hex[:12]}@gmail.com"
-
-    yield _generate
-
-
-@pytest.fixture
-def tracked_users() -> Iterator[list]:
-    """Test-created user ids; deleted via the admin API at teardown
-    (the profiles row goes with them via FK cascade)."""
-    ids: list = []
-    yield ids
-    for user_id in ids:
-        from app.config import supabase_service_http, settings
-        import httpx
-
-        resp = httpx.delete(
-            f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users/{user_id}",
-            headers=supabase_service_http(),
-            timeout=10,
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        for (method, suffix), handler in self.routes.items():
+            if request.method == method and request.url.path.endswith(suffix):
+                return handler(request) if callable(handler) else handler
+        return httpx.Response(
+            599,
+            json={
+                "msg": f"no canned response for {request.method} {request.url.path}",
+                "error_code": "unrouted_in_test",
+            },
         )
-        assert resp.status_code < 300, f"cleanup failed for {user_id}: {resp.text}"
 
 
-def pytest_sessionfinish(session, exitstatus):
-    """Post-run sweep: delete leaked test users.
+@pytest.fixture
+def upstream():
+    """Build an offline Supabase and route the transport through it.
 
-    Per-test teardown (tracked_users) deletes the users a test knows it
-    created. It misses users created just before a hard failure (the
-    register-before-track window) or a keyboard interrupt. This sweep
-    runs after every session and clears anything left matching the test
-    patterns, so a failed run never poisons the next one.
-
-    Silently skipped when credentials aren't configured (the whole
-    suite skips anyway) or when run with -p no:terminalreporter.
+    Usage: `upstream({("POST", "/auth/v1/token"): response})`, then call
+    the app; `recorded.requests` holds what the transport sent.
     """
-    missing = _missing_keys()
-    if missing:
-        return
-    try:
-        from app import admin, supabase
-    except Exception:
-        return
-    try:
-        leaked = admin.find_leaked_users()
-        if leaked:
-            admin.delete_users(leaked, log=lambda _msg: None)
-    except supabase.SupabaseError:
-        # Sweep must never turn a green run red; admin.py purge is the
-        # manual remedy when this happens.
-        pass
+    from app import supabase
+
+    created = []
+
+    def _use(routes: dict) -> Recorded:
+        recorded = Recorded(routes)
+        client = httpx.Client(transport=httpx.MockTransport(recorded))
+        created.append(client)
+        supabase.use_client(client)
+        return recorded
+
+    yield _use
+
+    supabase.use_client(None)
+    for client in created:
+        client.close()
 
 
 @pytest.fixture
-def register(client, unique_email, tracked_users):
-    """Register a fresh user and return (email, user dict, access_token)."""
+def offline_env(monkeypatch):
+    """Credentials for a mocked run: nothing real is contacted, but the
+    transport still assembles headers from settings."""
+    from app import config
 
-    def _register(
-        name: str = "Test User",
-        password: str = "Sup3rSecure!",
-        role: str = "mother",
-    ):
-        email = unique_email()
-        resp = client.post(
-            "/auth/register",
-            json={"name": name, "email": email, "password": password, "role": role},
-        )
-        # A 429 mid-run is Supabase's per-IP throttle, not a code defect.
-        # Fail with the remedy in the message instead of a bare assert.
-        if resp.status_code == 400 and "rate limit" in resp.text.lower():
-            pytest.fail(
-                "Supabase rate limit hit (per-IP Auth throttle). The suite "
-                "makes ~110 auth calls per run, so back-to-back runs trip it. "
-                "Wait ~5 minutes and rerun (see docs/supabase-setup.md, "
-                "Troubleshooting)."
-            )
-        assert resp.status_code == 201, resp.text
-        body = resp.json()
-        tracked_users.append(body["user"]["id"])
-        return email, body["user"], body["access_token"]
-
-    return _register
+    monkeypatch.setenv("SUPABASE_URL", "https://offline.supabase.test")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "offline-publishable")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "offline-secret")
+    config.reset_settings()
+    yield
+    config.reset_settings()
