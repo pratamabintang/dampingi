@@ -2,9 +2,12 @@ from typing import Optional
 
 from fastapi import FastAPI
 
+from auth import router as auth_router
 from config import settings
 
-app = FastAPI()
+app = FastAPI(title="dampingi", description="FastAPI backend backed by Supabase Auth")
+
+app.include_router(auth_router)
 
 
 @app.get("/")
