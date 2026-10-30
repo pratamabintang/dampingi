@@ -5,8 +5,6 @@ That limitation is the contract, not a bug (parent repo: .scratch/logout/spec.md
 
 from uuid import uuid4
 
-import base64
-import jwt as pyjwt
 import pytest
 
 pytestmark = pytest.mark.live

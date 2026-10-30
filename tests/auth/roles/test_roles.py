@@ -4,10 +4,22 @@ immutable. Authorization data lives in profiles.role, never the JWT."""
 from uuid import uuid4
 
 import base64
-import jwt as pyjwt
 import pytest
 
 pytestmark = pytest.mark.live
+
+
+def _claims(token: str) -> dict:
+    """Decode a JWT's claims WITHOUT verifying the signature.
+
+    Test-only helper: proves that a claim can say one thing while
+    profiles says another (ADR-0005). Never authorize from this.
+    """
+    import json
+
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload))
 
 
 def test_register_accepts_each_role(client, supabase_env, unique_email, tracked_users):

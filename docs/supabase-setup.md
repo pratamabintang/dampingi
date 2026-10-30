@@ -108,11 +108,16 @@ Invoke-RestMethod "https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.js
 
 **Local (app):** copy `.env.example` → `.env` (in `dampingi/`) and fill in the values.
 
-**Local (tests):** copy `dampingi/tests/.env.example` → `dampingi/tests/.env` with the same values. Without it, all live tests *skip* (CI without a project stays green); with it, `pytest` runs the whole live suite and cleans up its users. From the `dampingi/` directory:
+**Local (tests):** copy `dampingi/tests/.env.example` → `dampingi/tests/.env` with the same values. Without it, live tests *skip* (CI without a project stays green). From the `dampingi/` directory:
 
 ```powershell
-pytest
+pytest            # offline: mocked tests only, no credentials or network needed
+pytest -m live    # the live suite: hits the real project, cleans up its users
 ```
+
+`pytest` on its own is offline by design (ADR-0006): live tests carry a `live`
+marker and are deselected. Note the live suite makes ~110 auth calls per run and
+Supabase throttles per IP — wait ~5 minutes between consecutive live runs.
 
 **Render:** add the three env vars to the web service (Dashboard → Environment) — same names as the `.env` keys. `render.yaml` needs no start-command changes.
 
