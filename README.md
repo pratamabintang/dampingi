@@ -1,27 +1,42 @@
-# Deploy FastAPI on Render
+# dampingi
 
-Use this repo as a template to deploy a Python [FastAPI](https://fastapi.tiangolo.com) service on Render.
+FastAPI backend backed by Supabase Auth (register / login / `/me`).
 
-See https://render.com/docs/deploy-fastapi or follow the steps below:
+Deployed on Render (see `render.yaml`); identity is delegated to
+Supabase Auth — design decisions in the parent repo's `docs/adr/`.
 
-## Manual Steps
+## Layout
 
-1. You may use this repository directly or [create your own repository from this template](https://github.com/render-examples/fastapi/generate) if you'd like to customize the code.
-2. Create a new Web Service on Render.
-3. Specify the URL to your new repository or this repository.
-4. Render will automatically detect that you are deploying a Python service and use `pip` to download the dependencies.
-5. Specify the following as the Start Command.
+```
+app/
+  main.py       FastAPI assembly            (uvicorn app.main:app)
+  auth.py       register / login / /me endpoints
+  supabase.py   thin httpx transport for the Supabase REST API
+  config.py     pydantic-settings configuration (env / .env)
+  admin.py      test-user hygiene CLI       (python -m app.admin)
+tests/          live integration suite (talks to the real project)
+docs/           supabase-setup.md — project setup + troubleshooting
+```
 
-    ```shell
-    uvicorn main:app --host 0.0.0.0 --port $PORT
-    ```
+## Local run
 
-6. Click Create Web Service.
+```powershell
+pip install -r requirements.txt
+copy .env.example .env    # fill in SUPABASE_* values (docs/supabase-setup.md)
+uvicorn app.main:app --reload
+```
 
-Or simply click:
+## Tests
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/render-examples/fastapi)
+```powershell
+pytest                     # live suite; skips cleanly when tests/.env is absent
+python -m app.admin status # what test users exist right now
+```
 
-## Thanks
+## Deploy
 
-Thanks to [Harish](https://harishgarg.com) for the [inspiration to create a FastAPI quickstart for Render](https://twitter.com/harishkgarg/status/1435084018677010434) and for some sample code!
+1. Push this repo; create a Web Service on Render from it.
+2. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   (already set in `render.yaml`).
+3. Add `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`
+   in the Render dashboard (docs/supabase-setup.md §6).

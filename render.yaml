@@ -6,7 +6,7 @@ services:
     plan: free
     autoDeploy: false
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       # Values are managed in the Render dashboard (sync: false), never
       # committed. See docs/supabase-setup.md for where to get them.

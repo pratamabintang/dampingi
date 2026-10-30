@@ -8,7 +8,7 @@ import uuid
 
 
 def test_is_test_email_patterns(client, supabase_env):
-    from admin import is_test_email
+    from app.admin import is_test_email
 
     assert is_test_email("pytest.abc123@gmail.com")
     assert is_test_email("probe.xyz@gmail.com")
@@ -20,8 +20,8 @@ def test_is_test_email_patterns(client, supabase_env):
 def test_purge_deletes_leaked_test_users(client, supabase_env):
     """A user matching the test pattern is found and deleted by the
     sweep — the exact scenario the admin setup exists for."""
-    import admin
-    import supabase
+    from app import admin
+    from app import supabase
 
     email = f"pytest.swept{uuid.uuid4().hex[:12]}@gmail.com"
     body = supabase.signup(name="Sweep Me", email=email, password="Sup3rSecure!")
@@ -38,19 +38,20 @@ def test_purge_deletes_leaked_test_users(client, supabase_env):
 
 def test_purge_leaves_real_users_alone(client, supabase_env):
     """The default purge must never touch users outside the patterns."""
-    from admin import is_test_email
+    from app import admin
+    from app.admin import is_test_email
 
-    users = __import__("admin").all_user_ids()
+    users = admin.all_user_ids()
     non_test = [u for u in users if not is_test_email(u.get("email"))]
     # Sanity: a project where every user matches the test patterns is
     # expected in this repo; if a real user ever exists, verify the
     # sweep would skip them (it filters by pattern, never by identity).
     for u in non_test:
-        assert not __import__("admin").is_test_email(u.get("email"))
+        assert not admin.is_test_email(u.get("email"))
 
 
 def test_status_runs_clean(client, supabase_env, capsys):
-    import admin
+    from app import admin
 
     rc = admin.cmd_status(None)
     out = capsys.readouterr().out

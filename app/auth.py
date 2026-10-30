@@ -14,8 +14,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-import supabase
-from config import settings
+from app import supabase
+from app.config import settings
 
 router = APIRouter(tags=["auth"])
 

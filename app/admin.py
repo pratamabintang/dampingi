@@ -2,9 +2,9 @@
 
 Controls the authentication testing process:
 
-    python admin.py status              # what test users exist right now
-    python admin.py purge               # delete leaked test users
-    python admin.py purge --all         # delete every user in the project
+    python -m app.admin status         # what test users exist right now
+    python -m app.admin purge          # delete leaked test users
+    python -m app.admin purge --all    # delete every user in the project
 
 Only runs with SUPABASE_SECRET_KEY configured (dampingi/.env). purge's
 default pattern only matches test users (pytest.*/probe.* local parts);
@@ -21,7 +21,7 @@ import argparse
 import sys
 from typing import Callable, List, Optional
 
-import supabase
+from app import supabase
 
 TEST_EMAIL_PATTERNS = ("pytest.", "probe.")
 

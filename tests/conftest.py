@@ -7,8 +7,9 @@ from typing import Iterator
 
 import pytest
 
-# dampingi is a flat module app (main, auth, config, supabase at the
-# app root); tests sit inside it, so the root is already importable.
+# dampingi keeps its modules in the app/ package at the repo root;
+# tests sit next to it, so the root is already importable, but make it
+# explicit so the suite works from any cwd.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -60,7 +61,7 @@ def client(supabase_env):
     global _dummy_client
     from fastapi.testclient import TestClient
 
-    main = importlib.import_module("main")
+    main = importlib.import_module("app.main")
     _dummy_client = TestClient(main.app)
     return _dummy_client
 
@@ -97,7 +98,7 @@ def tracked_users() -> Iterator[list]:
     ids: list = []
     yield ids
     for user_id in ids:
-        from config import supabase_service_http, settings
+        from app.config import supabase_service_http, settings
         import httpx
 
         resp = httpx.delete(
@@ -124,8 +125,7 @@ def pytest_sessionfinish(session, exitstatus):
     if missing:
         return
     try:
-        import admin
-        import supabase
+        from app import admin, supabase
     except Exception:
         return
     try:

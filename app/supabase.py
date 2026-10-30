@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import httpx
 
-from config import supabase_auth_http, supabase_service_http, settings
+from app.config import supabase_auth_http, supabase_service_http, settings
 
 TIMEOUT = 10.0
 
