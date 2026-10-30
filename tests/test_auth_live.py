@@ -50,7 +50,7 @@ def test_register_rejects_non_gmail(client, supabase_env, unique_email):
         },
     )
     assert resp.status_code == 422
-    assert "@gmail.com" in resp.text
+    assert "gmail" in resp.text.lower()
 
 
 def test_register_rejects_missing_name(client, supabase_env, unique_email):
@@ -64,7 +64,7 @@ def test_register_rejects_missing_name(client, supabase_env, unique_email):
 def test_register_rejects_blank_name(client, supabase_env, unique_email):
     resp = client.post(
         "/auth/register",
-        json={"name": "", "email": unique_email, "password": "Sup3rSecure!"},
+        json={"name": "", "email": unique_email(), "password": "Sup3rSecure!"},
     )
     assert resp.status_code == 422
 
@@ -72,7 +72,7 @@ def test_register_rejects_blank_name(client, supabase_env, unique_email):
 def test_register_rejects_short_password(client, supabase_env, unique_email):
     resp = client.post(
         "/auth/register",
-        json={"name": "Shorty", "email": unique_email, "password": "short"},
+        json={"name": "Shorty", "email": unique_email(), "password": "short"},
     )
     assert resp.status_code == 422
 

@@ -113,13 +113,14 @@ def register(client, unique_email, tracked_users):
     """Register a fresh user and return (email, user dict, access_token)."""
 
     def _register(name: str = "Test User", password: str = "Sup3rSecure!"):
+        email = unique_email()
         resp = client.post(
             "/auth/register",
-            json={"name": name, "email": unique_email(), "password": password},
+            json={"name": name, "email": email, "password": password},
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         tracked_users.append(body["user"]["id"])
-        return unique_email, body["user"], body["access_token"]
+        return email, body["user"], body["access_token"]
 
     return _register

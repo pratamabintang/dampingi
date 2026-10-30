@@ -90,15 +90,26 @@ def register(payload: RegisterRequest) -> RegisterResponse:
         ) from exc
 
     user = body.get("user") or {}
+    # Signup responses come in two shapes: flat (access_token at top
+    # level — current API) or {user, session}. Handle both; the token
+    # is None only when email confirmation is enabled on the project.
     session = body.get("session") or {}
-    profile = supabase.fetch_profile(user.get("id", ""))
+    access_token = body.get("access_token") or session.get("access_token")
+    try:
+        profile = supabase.fetch_profile(user.get("id", ""))
+    except supabase.SupabaseError as exc:
+        # The auth user was created; the profile store is misconfigured
+        # (e.g. the profiles table / trigger was never created — see
+        # docs/supabase-setup.md). 503 rather than a bare 500 so the
+        # failure is identifiable, though retrying now yields 409.
+        raise HTTPException(status_code=503, detail=exc.message) from exc
     return RegisterResponse(
         user=UserOut(
             id=user.get("id", ""),
             email=user.get("email", payload.email),
             name=(profile or {}).get("name"),
         ),
-        access_token=session.get("access_token"),
+        access_token=access_token,
     )
 
 
@@ -120,7 +131,10 @@ def login(payload: LoginRequest) -> LoginResponse:
         ) from exc
 
     user = body.get("user") or {}
-    profile = supabase.fetch_profile(user.get("id", ""))
+    try:
+        profile = supabase.fetch_profile(user.get("id", ""))
+    except supabase.SupabaseError as exc:
+        raise HTTPException(status_code=503, detail=exc.message) from exc
     token = body.get("access_token")
     assert token is not None  # Supabase always returns one on password grant
     return LoginResponse(

@@ -48,7 +48,9 @@ create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = ''
-stable
+-- NOT "stable": PostgreSQL forbids INSERT in non-volatile functions,
+-- and a stable trigger function makes every signup fail with
+-- "Database error saving new user"
 as $$
 begin
   insert into public.profiles (user_id, name)
@@ -117,6 +119,7 @@ Invoke-RestMethod -Uri "http://localhost:8000/me" -Headers @{ Authorization = "B
 
 | Symptom | Cause |
 |---|---|
+| Register fails with "Database error saving new user" | The `handle_new_user` trigger function is not `volatile` (PostgreSQL forbids INSERT in stable functions). Fix: `alter function public.handle_new_user() volatile;` |
 | Login returns 401 for a just-registered user | Email confirmation wasn't disabled (step 3), or the user made a typo'd password |
 | `name` is `null` in responses | The trigger/table from step 4 was never run (fetching the profile returns no row) |
 | Register fails with a password policy error | Supabase enforces a minimum length (default 8); the app pre-validates to match |
