@@ -10,13 +10,20 @@ Supabase Auth — design decisions in the parent repo's `docs/adr/`.
 ```
 app/
   main.py       FastAPI assembly            (uvicorn app.main:app)
-  auth.py       register / login / /me endpoints
-  supabase.py   thin httpx transport for the Supabase REST API
   config.py     pydantic-settings configuration (env / .env)
+  supabase.py   thin httpx transport for the Supabase REST API (shared)
   admin.py      test-user hygiene CLI       (python -m app.admin)
+  auth/         DOMAIN MODEL: auth          (ADR-0004 — the pattern)
+    router.py     the API surface: routes, status-code mapping, token auth
+    service.py    the logic: the flows; never speaks HTTP
+    schemas.py    the data contracts: custom types, requests, responses
 tests/          live integration suite (talks to the real project)
 docs/           supabase-setup.md — project setup + troubleshooting
 ```
+
+Each domain model gets its own folder under `app/` with this logic /
+API / data-contracts split; shared infrastructure stays at `app/` root.
+`auth` is the reference implementation — copy it for the next domain.
 
 ## Local run
 
