@@ -1,0 +1,61 @@
+{
+  "_fixture": {
+    "captured": "2026-10-31",
+    "endpoint": "POST /auth/v1/signup",
+    "note": "FLAT shape: access_token/refresh_token sit at the top level, there is no 'session' key. service.py:51-55 accepts both shapes; this pins which one the project actually returns.",
+    "scrubbed": "tokens, emails, user ids replaced with placeholders"
+  },
+  "payload": {
+    "access_token": "OFFLINE-ACCESS-TOKEN",
+    "expires_at": 1793412760,
+    "expires_in": 3600,
+    "refresh_token": "OFFLINE-REFRESH-TOKEN",
+    "token_type": "bearer",
+    "user": {
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "aud": "authenticated",
+      "created_at": "2026-10-31T01:12:40.25678Z",
+      "email": "offline@gmail.com",
+      "email_confirmed_at": "2026-10-31T01:12:40.260620787Z",
+      "id": "00000000-0000-4000-8000-000000000001",
+      "identities": [
+        {
+          "created_at": "2026-10-31T01:12:40.258893Z",
+          "email": "offline@gmail.com",
+          "id": "00000000-0000-4000-8000-000000000001",
+          "identity_data": {
+            "email": "offline@gmail.com",
+            "email_verified": true,
+            "name": "Capture User",
+            "phone_verified": false,
+            "role": "mother",
+            "sub": "00000000-0000-4000-8000-000000000001"
+          },
+          "identity_id": "00000000-0000-4000-8000-000000000001",
+          "last_sign_in_at": "2026-10-31T01:12:40.258857341Z",
+          "provider": "email",
+          "updated_at": "2026-10-31T01:12:40.258893Z",
+          "user_id": "00000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "is_anonymous": false,
+      "last_sign_in_at": "2026-10-31T01:12:40.263377146Z",
+      "phone": "",
+      "role": "authenticated",
+      "updated_at": "2026-10-31T01:12:40.265018Z",
+      "user_metadata": {
+        "email": "offline@gmail.com",
+        "email_verified": true,
+        "name": "Capture User",
+        "phone_verified": false,
+        "role": "mother",
+        "sub": "00000000-0000-4000-8000-000000000001"
+      }
+    }
+  }
+}

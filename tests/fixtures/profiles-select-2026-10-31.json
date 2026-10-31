@@ -1,0 +1,14 @@
+{
+  "_fixture": {
+    "captured": "2026-10-31",
+    "endpoint": "GET /rest/v1/profiles?user_id=eq.<id>&select=user_id,name,deleted_at,role",
+    "note": "PostgREST returns an array; the transport takes rows[0]. Fields are exactly what fetch_profile selects.",
+    "scrubbed": "tokens, emails, user ids replaced with placeholders"
+  },
+  "payload": {
+    "deleted_at": null,
+    "name": "Capture User",
+    "role": "mother",
+    "user_id": "00000000-0000-4000-8000-000000000001"
+  }
+}

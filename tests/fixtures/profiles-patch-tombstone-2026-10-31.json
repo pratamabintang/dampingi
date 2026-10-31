@@ -1,0 +1,13 @@
+{
+  "_fixture": {
+    "captured": "2026-10-31",
+    "endpoint": "PATCH /rest/v1/profiles (no Prefer header)",
+    "note": "tombstone_profile sends no Prefer header: PostgREST's default is 204 with an EMPTY body. The mocked test previously assumed 200 + [{}].",
+    "scrubbed": "tokens, emails, user ids replaced with placeholders"
+  },
+  "payload": {
+    "body": "",
+    "content_type": null,
+    "status": 204
+  }
+}

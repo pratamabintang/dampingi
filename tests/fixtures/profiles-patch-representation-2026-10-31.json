@@ -1,0 +1,16 @@
+{
+  "_fixture": {
+    "captured": "2026-10-31",
+    "endpoint": "PATCH /rest/v1/profiles (Prefer: return=representation)",
+    "note": "update_profile_name sends Prefer: return=representation, so PostgREST answers 200 with a one-element array.",
+    "scrubbed": "tokens, emails, user ids replaced with placeholders"
+  },
+  "payload": [
+    {
+      "deleted_at": "2026-10-31T00:00:00+00:00",
+      "name": "Probe Renamed",
+      "role": "mother",
+      "user_id": "00000000-0000-4000-8000-000000000001"
+    }
+  ]
+}

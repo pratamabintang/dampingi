@@ -1,0 +1,12 @@
+{
+  "_fixture": {
+    "captured": "2026-10-31",
+    "endpoint": "POST /auth/v1/logout?scope=global",
+    "note": "204 with an empty body. Note Supabase's docs claim otherwise for the no-sessions case; this is the real success shape.",
+    "scrubbed": "tokens, emails, user ids replaced with placeholders"
+  },
+  "payload": {
+    "body": null,
+    "status": 204
+  }
+}

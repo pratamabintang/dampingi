@@ -9,15 +9,17 @@ authority on what Supabase actually does.
 import httpx
 import pytest
 
-from tests.conftest import supabase_error, supabase_json
+from tests.conftest import (
+    captured,
+    captured_empty,
+    supabase_error,
+    supabase_json,
+)
 
 # The account the overridden session claims to be (see mock_client).
-PROFILE = {
-    "user_id": "00000000-0000-4000-8000-000000000001",
-    "name": "Offline User",
-    "deleted_at": None,
-    "role": "mother",
-}
+# Captured from the real project, not invented: the fields are exactly what
+# fetch_profile selects.
+PROFILE = captured("profiles-select-2026-10-31")
 
 AUTH = {"Authorization": "Bearer offline-token"}
 
@@ -138,14 +140,17 @@ def test_partial_soft_delete_retry_completes_it(mock_client, upstream):
         ban_attempts["n"] += 1
         if ban_attempts["n"] == 1:
             return supabase_error(500, "upstream exploded", "unexpected_failure")
-        return supabase_json(200, {"id": PROFILE["user_id"], "banned_until": "2126-01-01"})
+        return supabase_json(200, captured("admin-user-ban-2026-10-31"))
 
     upstream(
         {
             (method, suffix): response,
-            ("POST", "/auth/v1/logout"): supabase_json(204, None),
+            ("POST", "/auth/v1/logout"): captured_empty("auth-logout-2026-10-31"),
             ("PUT", f"/auth/v1/admin/users/{PROFILE['user_id']}"): ban,
-            ("PATCH", "/rest/v1/profiles"): supabase_json(200, [{}]),
+            # Captured reality: no Prefer header -> 204, empty body.
+            ("PATCH", "/rest/v1/profiles"): captured_empty(
+                "profiles-patch-tombstone-2026-10-31"
+            ),
         }
     )
 
@@ -194,3 +199,43 @@ def test_transport_still_builds_real_requests(mock_client, upstream):
     assert sent.url.host == "offline.supabase.test"
     assert sent.url.path == "/rest/v1/profiles"
     assert sent.headers["apikey"] == "offline-secret"
+
+
+def test_register_reads_the_flat_signup_shape(mock_client, upstream):
+    """A real signup answers with the FLAT shape, and register must read it.
+
+    `service.register_user` accepts both `{user, session}` and a flat body
+    with `access_token` at the top level. This project returns the flat one
+    (captured 2026-10-31), so a regression that only reads `session` would
+    return `access_token: null` while still answering 201 — a silent break
+    no status assertion would catch. The payload is captured, not invented.
+    """
+    client, _ = mock_client
+    signup = captured("auth-signup-2026-10-31")
+    user_id = signup["user"]["id"]
+
+    upstream(
+        {
+            ("POST", "/auth/v1/signup"): supabase_json(200, signup),
+            ("GET", "/rest/v1/profiles"): supabase_json(
+                200, [{**PROFILE, "user_id": user_id}]
+            ),
+        }
+    )
+
+    resp = client.post(
+        "/auth/register",
+        json={
+            "name": "Capture User",
+            "email": "offline@gmail.com",
+            "password": "Sup3rSecure!",
+            "role": "mother",
+        },
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    # The token came from the flat field, through the real service branch.
+    assert body["access_token"] == signup["access_token"]
+    assert body["user"]["email"] == "offline@gmail.com"
+    assert body["user"]["role"] == "mother"

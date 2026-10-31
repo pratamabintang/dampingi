@@ -209,6 +209,39 @@ def supabase_json(status: int, body):
     return httpx.Response(status, json=body)
 
 
+FIXTURES_DIR = TESTS_DIR / "fixtures"
+
+
+def captured(name: str):
+    """A success payload captured from the real project (ADR-0006 decision 7).
+
+    Success *shape* is never hand-written: it is read from
+    `tests/fixtures/<name>.json`, which records the endpoint and capture date.
+    A stale fixture fails in the optimistic direction, which is why the live
+    suite stays the authority.
+    """
+    import json
+
+    path = FIXTURES_DIR / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no captured fixture {path.name}; see tests/fixtures/README.md"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))["payload"]
+
+
+def captured_empty(name: str):
+    """A captured success response that carries no body (204).
+
+    Logout and the tombstone PATCH both answer 204 with an empty body; the
+    fixture records the status, so the test cannot quietly assume a 200.
+    """
+    import httpx
+
+    payload = captured(name)
+    return httpx.Response(payload["status"], content=b"")
+
+
 class _Recorded:
     """Stand-in upstream: answers by method + path, records what arrived."""
 

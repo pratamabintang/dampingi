@@ -32,15 +32,41 @@ token; `scope=global` killing the caller's own session; Supabase's docs claiming
 "204 with no sessions"; a 429 surfacing as a wrong password). A hand-written
 success body encodes what we *believe* Supabase returns.
 
+## Captured fixtures (all 2026-10-31)
+
+| File | Endpoint | What it pins |
+|---|---|---|
+| `profiles-select-2026-10-31.json` | `GET /rest/v1/profiles` | The row shape `fetch_profile` reads; PostgREST returns an array |
+| `profiles-patch-representation-2026-10-31.json` | `PATCH` with `Prefer: return=representation` | `update_profile_name`: 200 + one-element array |
+| `profiles-patch-tombstone-2026-10-31.json` | `PATCH` without `Prefer` | `tombstone_profile`: **204, empty body** |
+| `admin-user-ban-2026-10-31.json` | `PUT /auth/v1/admin/users/<id>` | Ban returns the **full auth user**, not a stub |
+| `auth-logout-2026-10-31.json` | `POST /auth/v1/logout` | 204, empty body |
+| `auth-signup-2026-10-31.json` | `POST /auth/v1/signup` | **Flat** shape: `access_token` at top level, no `session` key |
+
+Each file is `{"_fixture": {endpoint, captured, note}, "payload": …}`. Load it
+with `captured("name")` from `tests/conftest.py`; use `captured_empty("name")`
+for the 204 cases so a test cannot quietly assume a 200 body.
+
 To capture one:
 
 1. Hit the real endpoint once (a live test, or a scratch script).
 2. Save the body as `tests/fixtures/<endpoint>-<YYYY-MM-DD>.json`.
 3. **Scrub it**: replace access/refresh tokens, emails, and user ids with
-   obvious placeholders. Never commit a real token.
+   obvious placeholders. Never commit a real token. Scrub by key, not by
+   length — `authenticated` is a legitimate value for `aud`/`role` and must
+   survive (an over-eager regex once rewrote both).
 4. Note the endpoint and date at the top of the file.
 
 The date in the filename is the only signal that a fixture may predate a
 Supabase API change. A stale fixture fails in the optimistic direction — the
 mocked test keeps passing while the real API moved. The live suite is the
 authority; that is why it is never deleted or ported to a mock.
+
+## A capture is only worth what it catches
+
+Fidelity alone is not value. When a fixture replaces a hand-written body, check
+the test still **fails** when the code it covers is broken (mutate the branch,
+confirm red, restore). The tombstone `200 → 204` correction was real fidelity
+that changed no outcome — `tombstone_profile` only reads `status_code < 300`.
+The signup fixture earned its place: it is the only test that fails if
+`register_user` stops reading the flat `access_token` field.
