@@ -1,6 +1,6 @@
 """POST /auth/password: change the credential, verify the current one first."""
 
-from app import supabase as sb
+from app.auth import supabase as sb
 from app.auth import service
 
 import pytest
@@ -14,7 +14,7 @@ def test_throttled_verification_is_not_a_wrong_password(monkeypatch):
     Exercises service.change_password with the upstream call stubbed —
     the real 429 path would burn the suite's rate-limit budget.
     """
-    from app import supabase as sb
+    from app.auth import supabase as sb
     from app.auth import service
 
     session = service.Session(user_id="u", email="a@gmail.com", token="t")

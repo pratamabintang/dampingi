@@ -1,0 +1,153 @@
+﻿"""Logic for the moods domain: the flows.
+
+Never speaks HTTP: validation failures and business rules surface as
+domain exceptions. Router maps them to status codes.
+"""
+
+from datetime import date, datetime, timezone
+from typing import Optional
+
+from app.moods import supabase
+from app.supabase import SupabaseError
+from app.moods.schemas import MoodOut
+
+
+class MoodFutureDate(Exception):
+    """Attempted to create/update a mood entry for a future date."""
+
+
+class MoodNotFound(Exception):
+    """No mood entry exists for the given user and date."""
+
+
+class ProfileNotFound(Exception):
+    """The user has no active profile."""
+
+
+class InvalidDate(Exception):
+    """The provided date string is malformed or invalid."""
+
+
+def _parse_date(date_str: str) -> date:
+    """Parse YYYY-MM-DD string to date object.
+    
+    Raises InvalidDate if format or value is invalid.
+    """
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError) as e:
+        raise InvalidDate(f"Invalid date format: expected YYYY-MM-DD, got '{date_str}'") from e
+
+
+def _today() -> date:
+    """Current date in UTC."""
+    return datetime.now(timezone.utc).date()
+
+
+def _is_future(date_str: str) -> bool:
+    """Check if the given date is in the future (UTC).
+    
+    Raises InvalidDate if date_str is malformed.
+    """
+    parsed_date = _parse_date(date_str)
+    return parsed_date > _today()
+
+
+def create_mood(user_id: str, created_at: str, mood: int, desc: Optional[str] = None) -> MoodOut:
+    """Create a mood entry.
+
+    Validates that the date is not in the future and the user has an
+    active profile. Raises InvalidDate, MoodFutureDate, ProfileNotFound, or
+    SupabaseError.
+    """
+    # Strict date validation: malformed dates raise InvalidDate
+    if _is_future(created_at):
+        raise MoodFutureDate()
+
+    # Verify the user has an active (not soft-deleted) profile
+    profile = supabase.fetch_profile(user_id)
+    if not profile or profile.get("deleted_at"):
+        raise ProfileNotFound()
+
+    # Insert via PostgREST
+    row = supabase.create_mood(user_id, created_at, mood, desc)
+    return MoodOut(
+        user_id=row.get("user_id", ""),
+        created_at=row.get("created_at", ""),
+        mood=row.get("mood", 0),
+        desc=row.get("desc"),
+    )
+
+
+def get_mood(user_id: str, created_at: str) -> Optional[MoodOut]:
+    """Fetch a single mood entry.
+
+    Returns None if no entry exists. Raises InvalidDate on malformed date
+    or SupabaseError on transport failure.
+    """
+    # Validate date format
+    _parse_date(created_at)
+    
+    row = supabase.fetch_mood(user_id, created_at)
+    if not row:
+        return None
+    return MoodOut(
+        user_id=row.get("user_id", ""),
+        created_at=row.get("created_at", ""),
+        mood=row.get("mood", 0),
+        desc=row.get("desc"),
+    )
+
+
+def list_moods(user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> list[MoodOut]:
+    """List mood entries for a user within a date range (inclusive).
+
+    Both dates are optional. If provided, they must be YYYY-MM-DD format.
+    Results are ordered newest first. Raises InvalidDate on malformed dates.
+    """
+    # Validate date formats
+    if start_date:
+        _parse_date(start_date)
+    if end_date:
+        _parse_date(end_date)
+    
+    rows = supabase.list_moods(user_id, start_date, end_date)
+    return [
+        MoodOut(
+            user_id=row.get("user_id", ""),
+            created_at=row.get("created_at", ""),
+            mood=row.get("mood", 0),
+            desc=row.get("desc"),
+        )
+        for row in rows
+    ]
+
+
+def update_mood(user_id: str, created_at: str, mood: Optional[int] = None, desc: Optional[str] = None) -> MoodOut:
+    """Update the mood value and/or description for an entry.
+
+    The created_at date is immutable; only mood and desc fields can change.
+    At least one of mood or desc must be provided.
+    Raises InvalidDate, MoodNotFound, or SupabaseError.
+    """
+    # Validate date format
+    _parse_date(created_at)
+    
+    row = supabase.update_mood(user_id, created_at, mood, desc)
+    if not row:
+        raise MoodNotFound()
+    return MoodOut(
+        user_id=row.get("user_id", ""),
+        created_at=row.get("created_at", ""),
+        mood=row.get("mood", 0),
+        desc=row.get("desc"),
+    )
+
+
+def delete_mood(user_id: str, created_at: str) -> bool:
+    """Delete a mood entry.
+
+    Returns True if an entry was deleted, False if no entry existed.
+    Idempotent: deleting a non-existent entry is not an error.
+    """
+    return supabase.delete_mood(user_id, created_at)

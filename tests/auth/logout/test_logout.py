@@ -42,7 +42,7 @@ def test_logout_kills_every_session(client, supabase_env, register):
     refresh tokens, so direct transport calls are the only way to see it.)
     """
     email, _, _ = register()
-    from app import supabase as sb
+    from app.auth import supabase as sb
 
     first = sb.login(email, "Sup3rSecure!")   # session A
     second = sb.login(email, "Sup3rSecure!")  # session B
@@ -78,7 +78,7 @@ def test_logout_for_banned_but_not_tombstoned_user_is_403(
     logout with user_banned; the router maps it to the deleted-403 so one
     condition speaks one language across the API (as login does)."""
     _, user, token = register()
-    from app import supabase as sb
+    from app.auth import supabase as sb
 
     sb.ban_user(user["id"])  # no tombstone: deleted_at stays NULL
 

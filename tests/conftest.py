@@ -109,7 +109,7 @@ def tracked_users() -> Iterator[list]:
     """
     ids: list = []
     yield ids
-    from app import supabase
+    from app.auth import supabase
 
     for user_id in ids:
         supabase.delete_user(user_id)
@@ -134,7 +134,8 @@ def pytest_sessionfinish(session, exitstatus):
     if missing:
         return
     try:
-        from app import admin, supabase
+        from app import admin
+        from app.auth import supabase
     except Exception:
         return
     try:
@@ -321,6 +322,7 @@ def mock_client(offline_env):
     import app.main as main
     from app.auth import service
     from app.auth.router import verified_session
+    from app.moods import router as moods_router
 
     session = service.Session(
         user_id="00000000-0000-4000-8000-000000000001",
@@ -328,5 +330,6 @@ def mock_client(offline_env):
         token="offline-token",
     )
     main.app.dependency_overrides[verified_session] = lambda: session
+    main.app.dependency_overrides[moods_router.mother_only] = lambda: session
     yield TestClient(main.app), session
     main.app.dependency_overrides.clear()

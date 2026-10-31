@@ -114,7 +114,7 @@ def test_role_cannot_be_escalated_through_user_metadata(
     reporting profiles.role.
     """
     email, user, token = register(role="mother")
-    from app import supabase as sb
+    from app.auth import supabase as sb
 
     # Rewrite our own metadata using only the public key — exactly what an
     # attacker with a browser-visible key can do.

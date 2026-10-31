@@ -22,7 +22,7 @@ def test_delete_me_soft_deletes_and_returns_204(client, supabase_env, register):
     assert users[0].get("banned_until"), "auth identity not banned"
 
     # ...and the tombstone on profiles.
-    from app import supabase as sb
+    from app.auth import supabase as sb
 
     profile = sb.fetch_profile(user["id"])
     assert profile and profile.get("deleted_at"), "profile not tombstoned"

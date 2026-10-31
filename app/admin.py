@@ -21,7 +21,7 @@ import argparse
 import sys
 from typing import Callable, List, Optional
 
-from app import supabase
+from app.auth import supabase
 
 TEST_EMAIL_PATTERNS = ("pytest.", "probe.")
 

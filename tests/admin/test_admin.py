@@ -15,7 +15,7 @@ def test_purge_deletes_leaked_test_users(client, supabase_env):
     """A user matching the test pattern is found and deleted by the
     sweep — the exact scenario the admin setup exists for."""
     from app import admin
-    from app import supabase
+    from app.auth import supabase
 
     email = f"pytest.swept{uuid.uuid4().hex[:12]}@gmail.com"
     body = supabase.signup(

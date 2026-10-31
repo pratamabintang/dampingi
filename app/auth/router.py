@@ -13,8 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 
-from app import supabase
-from app.auth import service
+from app.auth import supabase, service
 from app.auth.schemas import (
     ChangePasswordRequest,
     LoginRequest,

@@ -67,7 +67,7 @@ def test_change_password_rejects_short_new(client, supabase_env, register):
 def test_change_password_revokes_sessions(client, supabase_env, register):
     """A password change kills refresh tokens (scope=global)."""
     email, _, token = register()
-    from app import supabase as sb
+    from app.auth import supabase as sb
 
     session = sb.login(email, "Sup3rSecure!")
     resp = client.post(
