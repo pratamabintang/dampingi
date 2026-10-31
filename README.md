@@ -20,9 +20,6 @@ app/
     service.py    the logic: the flows; never speaks HTTP
     schemas.py    the data contracts: custom types, requests, responses
 tests/          live integration suite (talks to the real project)
-supabase/
-  migrations/   baseline + delta migrations (applied by supabase db reset)
-  config.toml   Supabase CLI config (local Docker stack)
 ```
 
 Each domain model gets its own folder under `app/` with this logic /
