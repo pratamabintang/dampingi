@@ -28,18 +28,18 @@ def test_update_mood(client, register):
     body = resp.json()
     assert body["mood"] == 5
     assert body["created_at"] == "2026-10-30"  # unchanged
-    assert body["desc"] is None
+    assert body["description"] is None
 
     # Update description
     resp = client.patch(
         "/moods/2026-10-30",
         headers={"Authorization": f"Bearer {token}"},
-        json={"desc": "Better now"},
+        json={"description": "Better now"},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["mood"] == 5
-    assert body["desc"] == "Better now"
+    assert body["description"] == "Better now"
 
 
 @pytest.mark.live
@@ -70,7 +70,7 @@ def test_update_mood_invalid_date_format(client, register):
 
 
 def test_update_mood_rejects_extra_fields(mock_client):
-    """PATCH /moods rejects fields other than mood and desc."""
+    """PATCH /moods rejects fields other than mood and description."""
     client, session = mock_client
     
     resp = client.patch(

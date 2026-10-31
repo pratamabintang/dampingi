@@ -21,11 +21,11 @@ def test_create_mood(client, register):
     assert body["user_id"] == user["id"]
     assert body["mood"] == 4
     assert body["created_at"] == "2026-10-30"
-    assert body["desc"] is None
+    assert body["description"] is None
 
 
 @pytest.mark.live
-def test_create_mood_with_desc(client, register):
+def test_create_mood_with_description(client, register):
     """POST /moods with description."""
     email, user, token = register()
     
@@ -35,13 +35,13 @@ def test_create_mood_with_desc(client, register):
         json={
             "created_at": "2026-10-30",
             "mood": 5,
-            "desc": "Feeling great today!",
+            "description": "Feeling great today!",
         },
     )
     assert resp.status_code == 201
     body = resp.json()
     assert body["mood"] == 5
-    assert body["desc"] == "Feeling great today!"
+    assert body["description"] == "Feeling great today!"
 
 
 def test_create_mood_future_rejected(mock_client):
@@ -117,7 +117,7 @@ def test_create_mood_invalid_range(client, register):
 
 
 @pytest.mark.live
-def test_create_mood_desc_too_long(client, register):
+def test_create_mood_description_too_long(client, register):
     """POST /moods rejects description > 500 chars."""
     email, user, token = register()
     
@@ -127,7 +127,7 @@ def test_create_mood_desc_too_long(client, register):
         json={
             "created_at": "2026-10-30",
             "mood": 3,
-            "desc": "a" * 501,
+            "description": "a" * 501,
         },
     )
     assert resp.status_code == 422

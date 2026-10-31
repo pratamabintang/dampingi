@@ -15,7 +15,7 @@ def test_get_mood(client, register):
         json={
             "created_at": "2026-10-30",
             "mood": 4,
-            "desc": "Found clarity",
+            "description": "Found clarity",
         },
     )
     
@@ -29,7 +29,7 @@ def test_get_mood(client, register):
     assert body["user_id"] == user["id"]
     assert body["mood"] == 4
     assert body["created_at"] == "2026-10-30"
-    assert body["desc"] == "Found clarity"
+    assert body["description"] == "Found clarity"
 
 
 @pytest.mark.live
@@ -76,7 +76,7 @@ def test_list_moods(client, register):
             json={
                 "created_at": f"2026-10-{27 + i}",
                 "mood": [4, 3, 5][i],
-                "desc": f"Entry {i}",
+                "description": f"Entry {i}",
             },
         )
     
@@ -92,7 +92,7 @@ def test_list_moods(client, register):
     # Newest first
     assert body["moods"][0]["created_at"] == "2026-10-29"
     assert body["moods"][0]["mood"] == 5
-    assert body["moods"][0]["desc"] == "Entry 2"
+    assert body["moods"][0]["description"] == "Entry 2"
 
 
 @pytest.mark.live
@@ -107,7 +107,7 @@ def test_list_moods_with_range(client, register):
             headers={"Authorization": f"Bearer {token}"},
             json={
                 "created_at": f"2026-10-{26 + i}",
-                "mood": "good",
+                "mood": 3,
             },
         )
     

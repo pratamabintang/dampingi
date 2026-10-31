@@ -11,12 +11,12 @@ from app.supabase import (
 )
 
 
-def create_mood(user_id: str, created_at: str, mood: int, desc: str | None = None) -> dict:
+def create_mood(user_id: str, created_at: str, mood: int, description: str | None = None) -> dict:
     """Insert a mood entry via PostgREST.
 
     created_at is a date string in YYYY-MM-DD format.
     mood is an int from 1–5.
-    desc is an optional contextual note (max 500 chars, enforced at app layer).
+    description is an optional contextual note (max 500 chars).
     Returns the inserted row. Raises SupabaseError on conflict (duplicate
     user_id + created_at) or validation failure.
     """
@@ -25,8 +25,8 @@ def create_mood(user_id: str, created_at: str, mood: int, desc: str | None = Non
         "created_at": created_at,
         "mood": mood,
     }
-    if desc is not None:
-        payload["desc"] = desc
+    if description is not None:
+        payload["description"] = description
     
     resp = _request(
         _client().post,
@@ -56,7 +56,7 @@ def fetch_mood(user_id: str, created_at: str) -> dict | None:
         params={
             "user_id": f"eq.{user_id}",
             "created_at": f"eq.{created_at}",
-            "select": "user_id,created_at,mood,desc",
+            "select": "user_id,created_at,mood,description",
         },
         headers=supabase_service_http(),
         timeout=TIMEOUT,
@@ -76,13 +76,11 @@ def list_moods(user_id: str, start_date: str | None = None, end_date: str | None
     """
     params = {
         "user_id": f"eq.{user_id}",
-        "select": "user_id,created_at,mood,desc",
+        "select": "user_id,created_at,mood,description",
         "order": "created_at.desc",
     }
     if start_date:
         params["created_at"] = f"gte.{start_date}"
-    # PostgREST can't handle two conditions on the same column via params;
-    # if both start and end are set, we filter in Python (acceptable for moods)
 
     resp = _request(
         _client().get,
@@ -95,28 +93,25 @@ def list_moods(user_id: str, start_date: str | None = None, end_date: str | None
         raise _error_from_response(resp)
     rows = resp.json()
 
-    # Filter by end_date in Python if needed (moods is small per user)
     if end_date:
         rows = [r for r in rows if r.get("created_at", "") <= end_date]
 
     return rows
 
 
-def update_mood(user_id: str, created_at: str, mood: int | None = None, desc: str | None = None) -> dict | None:
+def update_mood(user_id: str, created_at: str, mood: int | None = None, description: str | None = None) -> dict | None:
     """Update the mood value and/or description for an entry.
 
     created_at is a date string in YYYY-MM-DD format.
-    mood is an optional int from 1–5 (if omitted, not updated).
-    desc is an optional contextual note (if omitted, not updated).
-    At least one of mood or desc must be non-None.
-    Returns the updated row or None if no entry matched. Raises SupabaseError
-    on transport failure or validation error.
+    mood is an optional int from 1–5.
+    description is an optional contextual note.
+    Returns the updated row or None if no entry matched.
     """
     payload = {}
     if mood is not None:
         payload["mood"] = mood
-    if desc is not None:
-        payload["desc"] = desc
+    if description is not None:
+        payload["description"] = description
     
     resp = _request(
         _client().patch,
@@ -124,7 +119,7 @@ def update_mood(user_id: str, created_at: str, mood: int | None = None, desc: st
         params={
             "user_id": f"eq.{user_id}",
             "created_at": f"eq.{created_at}",
-            "select": "user_id,created_at,mood,desc",
+            "select": "user_id,created_at,mood,description",
         },
         headers={**supabase_service_http(), "Prefer": "return=representation"},
         json=payload,

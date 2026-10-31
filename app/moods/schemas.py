@@ -12,7 +12,7 @@ class MoodCreate(BaseModel):
         description="Date in YYYY-MM-DD format (user's timezone)."
     )
     mood: int = Field(ge=1, le=5, description="Mood on 1–5 scale (1=very low, 5=very good).")
-    desc: Optional[str] = Field(
+    description: Optional[str] = Field(
         default=None, max_length=500, description="Optional contextual note (max 500 chars)."
     )
 
@@ -25,7 +25,7 @@ class MoodUpdate(BaseModel):
     mood: Optional[int] = Field(
         default=None, ge=1, le=5, description="Mood on 1–5 scale (1=very low, 5=very good)."
     )
-    desc: Optional[str] = Field(
+    description: Optional[str] = Field(
         default=None, max_length=500, description="Optional contextual note (max 500 chars)."
     )
 
@@ -36,7 +36,7 @@ class MoodOut(BaseModel):
     user_id: str
     created_at: str  # YYYY-MM-DD date
     mood: int  # 1–5 scale
-    desc: Optional[str]  # Optional contextual note
+    description: Optional[str]  # Optional contextual note
 
 
 class MoodListOut(BaseModel):

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from app.auth.guards import require_role
 from app.auth import service as auth_service
 from app.supabase import SupabaseError
-from app.moods import service
+from app.moods import service, supabase
 from app.moods.schemas import (
     MoodCreate,
     MoodListOut,
@@ -65,7 +65,7 @@ def create_mood(
         session.user_id,
         payload.created_at,
         payload.mood,
-        payload.desc,
+        payload.description,
     )
 
 
@@ -130,7 +130,7 @@ def update_mood(
         session.user_id,
         created_at,
         payload.mood,
-        payload.desc,
+        payload.description,
     )
 
 

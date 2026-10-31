@@ -35,7 +35,8 @@ def test_purge_deletes_leaked_test_users(client, supabase_env):
 def test_purge_deletes_soft_deleted_test_users(client, supabase_env):
     """A soft-deleted (banned + tombstoned) test user is inert but still
     occupies its email; purge must hard-delete it (ADR-0003)."""
-    from app import admin, supabase
+    from app import admin
+    from app.auth import supabase
 
     email = f"pytest.dead{uuid.uuid4().hex[:12]}@gmail.com"
     body = supabase.signup(

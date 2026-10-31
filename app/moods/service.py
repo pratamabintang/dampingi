@@ -7,6 +7,7 @@ domain exceptions. Router maps them to status codes.
 from datetime import date, datetime, timezone
 from typing import Optional
 
+from app.auth import supabase as auth_supabase
 from app.moods import supabase
 from app.supabase import SupabaseError
 from app.moods.schemas import MoodOut
@@ -53,7 +54,9 @@ def _is_future(date_str: str) -> bool:
     return parsed_date > _today()
 
 
-def create_mood(user_id: str, created_at: str, mood: int, desc: Optional[str] = None) -> MoodOut:
+def create_mood(
+    user_id: str, created_at: str, mood: int, description: Optional[str] = None
+) -> MoodOut:
     """Create a mood entry.
 
     Validates that the date is not in the future and the user has an
@@ -65,17 +68,17 @@ def create_mood(user_id: str, created_at: str, mood: int, desc: Optional[str] = 
         raise MoodFutureDate()
 
     # Verify the user has an active (not soft-deleted) profile
-    profile = supabase.fetch_profile(user_id)
+    profile = auth_supabase.fetch_profile(user_id)
     if not profile or profile.get("deleted_at"):
         raise ProfileNotFound()
 
     # Insert via PostgREST
-    row = supabase.create_mood(user_id, created_at, mood, desc)
+    row = supabase.create_mood(user_id, created_at, mood, description)
     return MoodOut(
         user_id=row.get("user_id", ""),
         created_at=row.get("created_at", ""),
         mood=row.get("mood", 0),
-        desc=row.get("desc"),
+        description=row.get("description"),
     )
 
 
@@ -95,11 +98,13 @@ def get_mood(user_id: str, created_at: str) -> Optional[MoodOut]:
         user_id=row.get("user_id", ""),
         created_at=row.get("created_at", ""),
         mood=row.get("mood", 0),
-        desc=row.get("desc"),
+        description=row.get("description"),
     )
 
 
-def list_moods(user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> list[MoodOut]:
+def list_moods(
+    user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None
+) -> list[MoodOut]:
     """List mood entries for a user within a date range (inclusive).
 
     Both dates are optional. If provided, they must be YYYY-MM-DD format.
@@ -117,30 +122,35 @@ def list_moods(user_id: str, start_date: Optional[str] = None, end_date: Optiona
             user_id=row.get("user_id", ""),
             created_at=row.get("created_at", ""),
             mood=row.get("mood", 0),
-            desc=row.get("desc"),
+            description=row.get("description"),
         )
         for row in rows
     ]
 
 
-def update_mood(user_id: str, created_at: str, mood: Optional[int] = None, desc: Optional[str] = None) -> MoodOut:
+def update_mood(
+    user_id: str,
+    created_at: str,
+    mood: Optional[int] = None,
+    description: Optional[str] = None,
+) -> MoodOut:
     """Update the mood value and/or description for an entry.
 
-    The created_at date is immutable; only mood and desc fields can change.
-    At least one of mood or desc must be provided.
+    The created_at date is immutable; only mood and description fields can change.
+    At least one of mood or description must be provided.
     Raises InvalidDate, MoodNotFound, or SupabaseError.
     """
     # Validate date format
     _parse_date(created_at)
     
-    row = supabase.update_mood(user_id, created_at, mood, desc)
+    row = supabase.update_mood(user_id, created_at, mood, description)
     if not row:
         raise MoodNotFound()
     return MoodOut(
         user_id=row.get("user_id", ""),
         created_at=row.get("created_at", ""),
         mood=row.get("mood", 0),
-        desc=row.get("desc"),
+        description=row.get("description"),
     )
 
 

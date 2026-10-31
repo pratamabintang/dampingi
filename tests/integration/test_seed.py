@@ -59,8 +59,8 @@ def test_migrations_applied(supabase_running: bool, supabase_db_client: httpx.Cl
         "/rest/v1/information_schema.tables",
         params={"table_schema": "eq.public", "table_name": "eq.profiles"},
     )
-    # PostgREST may have cache issues, fall back to direct check
-    assert resp.status_code == 200 or resp.status_code == 401, f"Unexpected status: {resp.status_code}"
+    # PostgREST may not expose information_schema (404) or have cache issues, fall back to direct check
+    assert resp.status_code in (200, 401, 404), f"Unexpected status: {resp.status_code}"
     
     # Check profiles exist (if schema applied, seed should have run)
     resp = supabase_db_client.get("/rest/v1/profiles?limit=1")

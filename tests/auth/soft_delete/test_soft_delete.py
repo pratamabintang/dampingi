@@ -79,7 +79,7 @@ def test_deleted_user_refresh_is_dead(client, supabase_env, register):
     email, _, _ = register()
     # grab a refresh token via direct transport login (app /auth/login
     # doesn't return one)
-    from app import supabase as sb
+    from app.auth import supabase as sb
 
     body = sb.login(email, "Sup3rSecure!")
     token = body["access_token"]
