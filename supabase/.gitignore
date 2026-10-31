@@ -1,0 +1,8 @@
+# Supabase local state
+.supabase/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
