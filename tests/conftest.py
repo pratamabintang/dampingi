@@ -322,6 +322,7 @@ def mock_client(offline_env):
     import app.main as main
     from app.auth import service
     from app.auth.router import verified_session
+    from app.journals import router as journals_router
     from app.moods import router as moods_router
 
     session = service.Session(
@@ -331,5 +332,8 @@ def mock_client(offline_env):
     )
     main.app.dependency_overrides[verified_session] = lambda: session
     main.app.dependency_overrides[moods_router.mother_only] = lambda: session
+    main.app.dependency_overrides[journals_router.mother_or_companion] = (
+        lambda: session
+    )
     yield TestClient(main.app), session
     main.app.dependency_overrides.clear()
