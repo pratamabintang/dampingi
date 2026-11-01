@@ -515,6 +515,142 @@ def journals_table(upstream):
     return _use
 
 
+# --- Shared moods fixture ----------------------------------------------------
+#
+# Moods predates the captured-fixture discipline and has no captured success
+# payload of its own (see tests/fixtures/README.md, "Known capture gaps"). The
+# insert body is therefore echoed from the request rather than read from a
+# file: for `Prefer: return=representation` PostgREST returns the row that was
+# inserted, and the moods table has no server-side defaults, so the echo is the
+# faithful answer. It is a gap in *capture*, not licence to invent a shape —
+# the live suite stays the authority on what the real table returns.
+
+
+def mood_row(user_id, day, mood=3, description=None):
+    """A moods row as this fake stores it: the columns the transport sends."""
+    return {
+        "user_id": user_id,
+        "created_at": day,
+        "mood": mood,
+        "description": description,
+    }
+
+
+@pytest.fixture
+def moods_table(upstream):
+    """A canned Supabase holding a real moods table, behaving like PostgREST.
+
+    Modelled for the same reasons `journals_table` is, each part load-bearing:
+
+    - `select` is honoured, so a transport asking for a column that is not
+      there fails loudly instead of returning an invented default.
+    - `user_id` is a filter, never a suggestion: a transport that stopped
+      scoping by user would return a stranger's Mood here.
+    - The composite key `(user_id, created_at)` is enforced, because the table
+      enforces it. A fake that appended blindly would answer 201 to a second
+      Mood for the same day, so the duplicate-conflict test could never fail —
+      it would be asserting the fake's optimism, not the API's behaviour.
+    - A duplicate answers 409 with the SQLSTATE in `code`, which is the shape
+      PostgREST really returns for this table.
+    - PATCH and DELETE answer with the rows they matched, as PostgREST does
+      under `Prefer: return=representation`; DELETE without that header answers
+      204 with no body, as PostgREST really does.
+
+    `moods` is the whole table, every user's rows; mutations persist for the
+    life of the test.
+    """
+
+    import json
+
+    import httpx
+
+    def _use(profile, moods=None):
+        rows = list(moods or [])
+
+        def _match(request):
+            wanted_user = request.url.params.get("user_id")
+            wanted_day = request.url.params.get("created_at")
+            return [
+                row
+                for row in rows
+                if (
+                    wanted_user is None
+                    or row["user_id"] == wanted_user.removeprefix("eq.")
+                )
+                and (
+                    wanted_day is None
+                    or row["created_at"] == wanted_day.removeprefix("eq.")
+                )
+            ]
+
+        def _select(request, matched):
+            asked = request.url.params["select"].split(",")
+            return [{k: row[k] for k in asked if k in row} for row in matched]
+
+        def profile_get(request):
+            asked = request.url.params["select"].split(",")
+            return supabase_json(
+                200, [{k: profile[k] for k in asked if k in profile}]
+            )
+
+        def mood_get(request):
+            hits = _match(request)
+            order = request.url.params.get("order")
+            if order == "created_at.desc":
+                hits = sorted(hits, key=lambda r: r["created_at"], reverse=True)
+            elif order == "created_at.asc":
+                hits = sorted(hits, key=lambda r: r["created_at"])
+            return supabase_json(200, _select(request, hits))
+
+        def mood_post(request):
+            body = json.loads(request.content)
+            clash = [
+                row
+                for row in rows
+                if row["user_id"] == body["user_id"]
+                and row["created_at"] == body["created_at"]
+            ]
+            if clash:
+                return httpx.Response(
+                    409,
+                    json={
+                        "code": "23505",
+                        "details": "Key (user_id, created_at) already exists.",
+                        "message": "duplicate key value violates unique constraint",
+                    },
+                )
+            row = {**mood_row(body["user_id"], body["created_at"]), **body}
+            rows.append(row)
+            return supabase_json(201, [row])
+
+        def mood_patch(request):
+            hits = _match(request)
+            body = json.loads(request.content)
+            for row in hits:
+                row.update(body)
+            return supabase_json(200, _select(request, hits))
+
+        def mood_delete(request):
+            hits = _match(request)
+            for row in hits:
+                rows.remove(row)
+            if "return=representation" in (request.headers.get("prefer") or ""):
+                return supabase_json(200, _select(request, hits))
+            return httpx.Response(204, content=b"")
+
+        return upstream(
+            {
+                ("GET", "/rest/v1/profiles"): profile_get,
+                ("GET", "/rest/v1/moods"): mood_get,
+                ("POST", "/rest/v1/moods"): mood_post,
+                ("PATCH", "/rest/v1/moods"): mood_patch,
+                ("DELETE", "/rest/v1/moods"): mood_delete,
+            }
+        )
+
+    return _use
+
+
 @pytest.fixture
 def mock_client(offline_env):
     """A TestClient that needs no credentials and no network.

@@ -43,6 +43,11 @@ def _handle_mood_errors(func, *args):
             status_code=404,
             detail="User profile not found or has been deleted",
         )
+    except service.MoodDuplicate as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A mood already exists for {exc.created_at}",
+        )
     except service.MoodNotFound:
         raise HTTPException(status_code=404, detail="Mood entry not found")
     except supabase.SupabaseError as exc:

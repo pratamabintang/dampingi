@@ -21,12 +21,45 @@ class MoodNotFound(Exception):
     """No mood entry exists for the given user and date."""
 
 
+class MoodDuplicate(Exception):
+    """The user already has a Mood recorded for that day.
+
+    Carries the day so the router can name it in the refusal: "already
+    recorded" is only actionable if the client learns *which* day collided.
+    """
+
+    def __init__(self, created_at: str):
+        super().__init__(created_at)
+        self.created_at = created_at
+
+
 class ProfileNotFound(Exception):
     """The user has no active profile."""
 
 
 class InvalidDate(Exception):
     """The provided date string is malformed or invalid."""
+
+
+# Postgres SQLSTATE for a unique violation. PostgREST forwards it as the
+# body's `code`, so a duplicate day is distinguishable without matching on
+# prose.
+#
+# Keying on the SQLSTATE and NOT on the HTTP status is load-bearing:
+# PostgREST answers 409 for a foreign-key violation too (23503), verified
+# against the real project. A Profile hard-deleted between the guard and
+# the insert would otherwise be reported as "you already recorded today".
+_UNIQUE_VIOLATION = "23505"
+
+
+def _is_duplicate(exc: SupabaseError) -> bool:
+    """True when PostgREST refused the insert on the composite key.
+
+    Deliberately the SQLSTATE only, never `status == 409`: a foreign-key
+    violation is also a 409, and calling that "duplicate day" would be a
+    lie — and a 409 tells a client not to retry a write that never landed.
+    """
+    return exc.error_code == _UNIQUE_VIOLATION
 
 
 def _parse_date(date_str: str) -> date:
@@ -60,8 +93,12 @@ def create_mood(
     """Create a mood entry.
 
     Validates that the date is not in the future and the user has an
-    active profile. Raises InvalidDate, MoodFutureDate, ProfileNotFound, or
-    SupabaseError.
+    active profile. Raises InvalidDate, MoodFutureDate, MoodDuplicate,
+    ProfileNotFound, or SupabaseError.
+
+    A second Mood for a day the user has already recorded raises
+    MoodDuplicate, which the router answers with 409. That is a conflict the
+    client can act on, not an outage it should retry.
     """
     # Strict date validation: malformed dates raise InvalidDate
     if _is_future(created_at):
@@ -73,7 +110,13 @@ def create_mood(
         raise ProfileNotFound()
 
     # Insert via PostgREST
-    row = supabase.create_mood(user_id, created_at, mood, description)
+    try:
+        row = supabase.create_mood(user_id, created_at, mood, description)
+    except SupabaseError as exc:
+        if _is_duplicate(exc):
+            raise MoodDuplicate(created_at) from exc
+        raise
+
     return MoodOut(
         user_id=row.get("user_id", ""),
         created_at=row.get("created_at", ""),
