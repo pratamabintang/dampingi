@@ -309,7 +309,9 @@ def test_create_mood_invalid_range(client, register):
 
 
 @pytest.mark.live
-def test_a_second_mood_for_the_same_day_is_a_conflict(client, register):
+def test_a_second_mood_for_the_same_day_conflicts_on_the_real_table(
+    client, register
+):
     """The real table's composite key surfaces as 409, naming the day.
 
     The authority for ticket 07: the offline test asserts this against a fake

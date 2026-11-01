@@ -62,6 +62,19 @@ file records *when* the shape was last seen. Capture one when the local stack
 is next up, per the procedure above. Do not hand-write it: an invented
 success body is the failure mode this whole section exists to prevent.
 
+**Moods has no captured success payload at all.** There is no
+`moods-select-*.json` or `moods-post-*.json`. The `moods_table` fixture in
+`tests/conftest.py` therefore echoes the inserted row back from the request
+body, which is faithful only because `public.moods` has no server-side
+defaults (`user_id`, `created_at`, `mood` and `description` are all supplied
+by the transport). That reasoning is a claim about the schema, not a record of
+what the API returned — capture a `POST` and a `GET /rest/v1/moods` body when
+the stack is next up, and replace the echo with them.
+
+This gap is the same class as the Journals one above: the live suite
+(`tests/moods/test_create.py`, `-m live`) is what checks the assumption
+against the real project.
+
 When the `select` list changes, capture a **new** dated file — never edit an
 existing one. The date is the only signal that a fixture may predate an API
 change, and an edited file lies about when it was taken.
