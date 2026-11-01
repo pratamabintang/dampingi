@@ -117,6 +117,22 @@ def _is_duplicate(exc: SupabaseError) -> bool:
     return exc.error_code == _UNIQUE_VIOLATION
 
 
+def _require_active_profile(user_id: str) -> dict:
+    """The caller's Profile, or JournalProfileNotFound.
+
+    A tombstoned Profile cannot act (ADR-0003): no writes, no edits, no
+    deletes. Every mutating flow needs this, so it lives in one place — three
+    copies of the same check is three chances for one to drift, and the one
+    that drifted would be the one that lets a deleted identity write.
+
+    Returns the Profile, which the caller may use (create needs its timezone).
+    """
+    profile = auth_supabase.fetch_profile(user_id)
+    if not profile or profile.get("deleted_at"):
+        raise JournalProfileNotFound()
+    return profile
+
+
 def create_journal(
     user_id: str, title: str, content: str, created_at: Optional[str] = None
 ) -> JournalOut:
@@ -128,9 +144,7 @@ def create_journal(
     Raises JournalInvalidDate, JournalFutureDate, JournalDuplicate,
     JournalProfileNotFound, or SupabaseError.
     """
-    profile = auth_supabase.fetch_profile(user_id)
-    if not profile or profile.get("deleted_at"):
-        raise JournalProfileNotFound()
+    profile = _require_active_profile(user_id)
 
     if created_at is None:
         day = _today_for(profile).isoformat()
@@ -184,26 +198,24 @@ def update_journal(
     Journal that day (which is also the answer for another Author's Journal),
     JournalProfileNotFound for a tombstoned Profile, or SupabaseError on a
     transport failure.
+
+    Order matters: the date and the payload are validated before the Profile
+    is read, so a malformed request is a 400 whatever state the Profile is in.
+    A tombstoned caller sending `{}` therefore gets 400 rather than 404 —
+    validation first, and the answer leaks nothing either way.
     """
     day = _parse_date(created_at).isoformat()
 
-    changes = {}
-    if title is not None:
-        changes["title"] = title
-    if content is not None:
-        changes["content"] = content
-    if not changes:
+    if title is None and content is None:
         raise JournalNothingToUpdate()
 
     # A tombstoned Profile cannot act (ADR-0003). Checked before the write so
     # a live token outliving the deletion cannot still edit entries.
-    profile = auth_supabase.fetch_profile(user_id)
-    if not profile or profile.get("deleted_at"):
-        raise JournalProfileNotFound()
+    _require_active_profile(user_id)
 
     # PostgREST answers a PATCH that matched nothing with 200 and an empty
     # array, so an empty result is the only signal that there was no row.
-    row = supabase.update_journal(user_id, day, changes)
+    row = supabase.update_journal(user_id, day, title, content)
     if not row:
         raise JournalNotFound()
     return _to_out(row)
@@ -221,9 +233,7 @@ def delete_journal(user_id: str, created_at: str) -> None:
 
     # A tombstoned Profile cannot act (ADR-0003). Checked before the write so
     # a live token outliving the deletion cannot still destroy entries.
-    profile = auth_supabase.fetch_profile(user_id)
-    if not profile or profile.get("deleted_at"):
-        raise JournalProfileNotFound()
+    _require_active_profile(user_id)
 
     # Deliberately not idempotent, unlike moods: ticket 06 asks for 404 when
     # there was nothing to delete, so the caller is not told a no-op worked.

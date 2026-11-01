@@ -12,35 +12,24 @@ still pass; a fake that answered 200 regardless of what matched would make the
 404 cases unfalsifiable.
 """
 
-from tests.conftest import captured
+from tests.conftest import OTHER_AUTHOR, journal_row, journals_profile
 
 AUTH = {"Authorization": "Bearer offline-token"}
 
 # Captured from the real project, including the timezone column.
-PROFILE = captured("profiles-select-2026-11-01")
+PROFILE = journals_profile()
 
-# Captured from the real project: the row shape a Journals select returns.
-JOURNAL_ROW = captured("journals-select-2026-11-01")[0]
-
-# Another real Profile, so the two-Author tests are two Authors.
-OTHER = "00000000-0000-4000-8000-0000000000f1"
+OTHER = OTHER_AUTHOR
 
 DAY = "2026-10-30"
 
 
 def _journal(user_id=PROFILE["user_id"], day=DAY, title="A day", content="As written."):
-    """A Journals row in the shape the real API returns."""
-    return {
-        **JOURNAL_ROW,
-        "user_id": user_id,
-        "created_at": day,
-        "title": title,
-        "content": content,
-    }
+    return journal_row(user_id, day, title, content)
 
 
 def _mother(**overrides):
-    return {**PROFILE, "role": "mother", **overrides}
+    return journals_profile(**overrides)
 
 
 def test_the_title_can_be_edited_on_its_own(mock_client, journals_table):
@@ -123,10 +112,11 @@ def test_a_day_in_the_payload_is_ignored(mock_client, journals_table):
 
     The field is accepted and dropped: the day comes from the URL, and the
     entry stays on it. The fake applies a PATCH body verbatim, so a transport
-    that forwarded this field would move the row and fail here.
+    that forwarded this field would move the row — which the reads below
+    would see.
     """
     client, _ = mock_client
-    table = journals_table(_mother(), journals=[_journal()])
+    journals_table(_mother(), journals=[_journal()])
 
     resp = client.patch(
         f"/journals/{DAY}",
@@ -136,7 +126,13 @@ def test_a_day_in_the_payload_is_ignored(mock_client, journals_table):
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["created_at"] == DAY
-    assert [row["created_at"] for row in table.rows] == [DAY]
+
+    # The entry is still on its own day...
+    stayed = client.get(f"/journals/{DAY}", headers=AUTH)
+    assert stayed.status_code == 200, stayed.text
+    assert stayed.json()["created_at"] == DAY
+    # ...and the day named in the payload never gained one.
+    assert client.get("/journals/2020-01-01", headers=AUTH).status_code == 404
 
 
 def test_an_update_with_no_fields_is_refused(mock_client, journals_table):
@@ -223,7 +219,7 @@ def test_another_authors_journal_is_not_found(
     the edit would legitimately succeed.
     """
     client, _ = mock_client
-    table = journals_table(
+    journals_table(
         _mother(), journals=[_journal(title="Mine", content="Private.")]
     )
 
@@ -234,16 +230,20 @@ def test_another_authors_journal_is_not_found(
 
     assert resp.status_code == 404, resp.text
     assert resp.status_code != 403
-    # The entry itself is unchanged: the 404 was a real refusal, not a
-    # politely-worded success.
-    assert [row["title"] for row in table.rows] == ["Mine"]
-    assert [row["content"] for row in table.rows] == ["Private."]
+
+    # The 404 was a real refusal, not a politely-worded success: the Author
+    # reads their entry back unchanged.
+    as_author(PROFILE["user_id"])
+    read = client.get(f"/journals/{DAY}", headers=AUTH)
+    assert read.status_code == 200, read.text
+    assert read.json()["title"] == "Mine"
+    assert read.json()["content"] == "Private."
 
 
 def test_a_soft_deleted_profile_may_not_edit(mock_client, journals_table):
     """A tombstoned Profile cannot act (ADR-0003), edits included."""
     client, _ = mock_client
-    table = journals_table(
+    journals_table(
         _mother(deleted_at="2026-10-30T00:00:00+00:00"),
         journals=[_journal(title="Before deletion")],
     )
@@ -253,7 +253,12 @@ def test_a_soft_deleted_profile_may_not_edit(mock_client, journals_table):
     )
 
     assert resp.status_code == 404, resp.text
-    assert [row["title"] for row in table.rows] == ["Before deletion"]
+
+    # Refused, and nothing changed: the Author still reads the entry as it
+    # was. (Reads are not tombstone-gated — see ticket 04's open question.)
+    read = client.get(f"/journals/{DAY}", headers=AUTH)
+    assert read.status_code == 200, read.text
+    assert read.json()["title"] == "Before deletion"
 
 
 def test_a_professional_is_refused_by_the_real_gate(

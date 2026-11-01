@@ -347,14 +347,50 @@ def as_author():
     return _as
 
 
+# --- Shared journals fixtures (write, edit, delete) ---------------------------
+#
+# The row builders and the two Author ids are identical across the journals
+# suites, so they live here. A per-module copy is a copy that drifts, and a
+# drifted copy is a test asserting a shape the API does not produce.
+
+def journals_profile(**overrides):
+    """The captured Profile, defaulted to the Mother role.
+
+    Captured from the real project (ADR-0006): fields are exactly what
+    `fetch_profile` selects, `timezone` included (ADR-0007).
+    """
+    return {**captured("profiles-select-2026-11-01"), "role": "mother", **overrides}
+
+
+# Another real Profile, so two-Author tests really are two Authors.
+OTHER_AUTHOR = "00000000-0000-4000-8000-0000000000f1"
+
+
+def journal_row(user_id, day, title="A day", content="As written."):
+    """A Journals row in the shape the real API returns, with fields replaced.
+
+    Built from the captured select body rather than hand-written, so the fake
+    cannot drift into a shape the API does not actually produce (ADR-0006).
+    """
+    return {
+        **captured("journals-select-2026-11-01")[0],
+        "user_id": user_id,
+        "created_at": day,
+        "title": title,
+        "content": content,
+    }
+
+
 @pytest.fixture
 def journals_table(upstream):
     """A canned Supabase holding a real Journals table, behaving like PostgREST.
 
-    Shared by the write, edit, and delete suites. Each needs a table that
-    actually holds rows across Authors, applies the `user_id` filter, honours
-    `select`, and mutates. A per-module copy is a copy that drifts, and a fake
-    that ignores the filter makes every privacy test unfalsifiable (ADR-0006).
+    Used by the edit and delete suites. (The write suite predates it and still
+    carries its own `_postgrest`; consolidating that is a separate change, not
+    something to smuggle into this one.) Each suite needs a table that actually
+    holds rows across Authors, applies the `user_id` filter, honours `select`,
+    and mutates. A per-module copy is a copy that drifts, and a fake that
+    ignores the filter makes every privacy test unfalsifiable (ADR-0006).
 
     `journals` is the whole table, every Author's rows. Mutations persist for
     the life of the test, so "write, edit, read back" is one table rather than

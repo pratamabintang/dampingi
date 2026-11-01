@@ -71,19 +71,31 @@ def fetch_journal(user_id: str, created_at: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def update_journal(user_id: str, created_at: str, changes: dict) -> dict | None:
+def update_journal(
+    user_id: str,
+    created_at: str,
+    title: str | None = None,
+    content: str | None = None,
+) -> dict | None:
     """Edit this Author's Journal for a day.
 
-    `changes` holds only the columns to write. It never carries `user_id` or
-    `created_at`: both come from this function's arguments, and `created_at`
-    is a filter rather than a value to set, so an edit cannot move a Journal
-    to another day even if a caller asked it to.
+    Takes the fields by name and builds the payload here, so the service never
+    names a database column. Neither `user_id` nor `created_at` can enter the
+    body: they are not parameters to set, they are this function's arguments,
+    and `created_at` is a filter. That makes "an edit cannot move a Journal to
+    another day" structural rather than a promise.
 
     Returns the updated row, or None when nothing matched — which is both
     "this Author has no Journal that day" and "that day belongs to someone
     else". PostgREST answers 200 with an empty array for a PATCH that matched
     no rows, so the returned rows are the only signal.
     """
+    payload = {}
+    if title is not None:
+        payload["title"] = title
+    if content is not None:
+        payload["content"] = content
+
     resp = _request(
         _client().patch,
         f"{_base_url()}/rest/v1/journals",
@@ -93,7 +105,7 @@ def update_journal(user_id: str, created_at: str, changes: dict) -> dict | None:
             "select": _COLUMNS,
         },
         headers={**supabase_service_http(), "Prefer": "return=representation"},
-        json=changes,
+        json=payload,
         timeout=TIMEOUT,
     )
     if resp.status_code >= 400:

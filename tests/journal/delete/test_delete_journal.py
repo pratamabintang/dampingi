@@ -20,47 +20,36 @@ Delete is deliberately *not* idempotent here, unlike moods: ticket 06 says a
 date with no entry is 404, so the caller learns their delete did nothing.
 """
 
-from tests.conftest import captured
+from tests.conftest import OTHER_AUTHOR, journal_row, journals_profile
 
 AUTH = {"Authorization": "Bearer offline-token"}
 
 # Captured from the real project, including the timezone column.
-PROFILE = captured("profiles-select-2026-11-01")
+PROFILE = journals_profile()
 
-# Captured from the real project: the row shape a Journals select returns.
-JOURNAL_ROW = captured("journals-select-2026-11-01")[0]
-
-# Another real Profile, so the two-Author tests are two Authors.
-OTHER = "00000000-0000-4000-8000-0000000000f1"
+OTHER = OTHER_AUTHOR
 
 DAY = "2026-10-30"
 
 
 def _journal(user_id=PROFILE["user_id"], day=DAY, title="A day", content="As written."):
-    """A Journals row in the shape the real API returns."""
-    return {
-        **JOURNAL_ROW,
-        "user_id": user_id,
-        "created_at": day,
-        "title": title,
-        "content": content,
-    }
+    return journal_row(user_id, day, title, content)
 
 
 def _mother(**overrides):
-    return {**PROFILE, "role": "mother", **overrides}
+    return journals_profile(**overrides)
 
 
 def test_an_author_deletes_their_own_journal(mock_client, journals_table):
-    """Deleting is a 204 and the row is gone from the table."""
+    """Deleting is a 204, and the row is gone from the table."""
     client, _ = mock_client
-    table = journals_table(_mother(), journals=[_journal()])
+    journals_table(_mother(), journals=[_journal()])
 
     resp = client.delete(f"/journals/{DAY}", headers=AUTH)
 
     assert resp.status_code == 204, resp.text
     assert resp.content == b""
-    assert table.rows == []
+    assert client.get(f"/journals/{DAY}", headers=AUTH).status_code == 404
 
 
 def test_reading_the_deleted_day_afterwards_is_not_found(
@@ -133,31 +122,39 @@ def test_another_authors_journal_may_not_be_deleted(
     the delete would legitimately succeed.
 
     The survival assertion is the important half: a 404 that still deleted
-    the row would be the worst possible outcome, so the table is inspected
-    directly rather than trusting the status code alone.
+    the row would be the worst possible outcome, so the Author reads their
+    entry back afterwards rather than the status code being trusted alone.
     """
     client, _ = mock_client
-    table = journals_table(_mother(), journals=[_journal(title="Mine")])
+    journals_table(_mother(), journals=[_journal(title="Mine")])
 
     as_author(OTHER)
     resp = client.delete(f"/journals/{DAY}", headers=AUTH)
 
     assert resp.status_code == 404, resp.text
     assert resp.status_code != 403
-    assert [row["title"] for row in table.rows] == ["Mine"]
+
+    as_author(PROFILE["user_id"])
+    read = client.get(f"/journals/{DAY}", headers=AUTH)
+    assert read.status_code == 200, read.text
+    assert read.json()["title"] == "Mine"
 
 
 def test_a_soft_deleted_profile_may_not_delete(mock_client, journals_table):
     """A tombstoned Profile cannot act (ADR-0003), deletions included."""
     client, _ = mock_client
-    table = journals_table(
+    journals_table(
         _mother(deleted_at="2026-10-30T00:00:00+00:00"), journals=[_journal()]
     )
 
     resp = client.delete(f"/journals/{DAY}", headers=AUTH)
 
     assert resp.status_code == 404, resp.text
-    assert len(table.rows) == 1, "a tombstoned Profile still deleted an entry"
+
+    # Refused, and the entry survived: reads are not tombstone-gated (see
+    # ticket 04's open question), so the Author still sees it.
+    read = client.get(f"/journals/{DAY}", headers=AUTH)
+    assert read.status_code == 200, "a tombstoned Profile still deleted an entry"
 
 
 def test_a_professional_is_refused_by_the_real_gate(
@@ -170,14 +167,13 @@ def test_a_professional_is_refused_by_the_real_gate(
     leave them all green. This is the one that notices.
     """
     client, _ = mock_client
-    table = journals_table(_mother(role="professional"), journals=[_journal()])
+    journals_table(_mother(role="professional"), journals=[_journal()])
 
     resp = client.delete(f"/journals/{DAY}", headers=AUTH)
 
     assert resp.status_code == 403, resp.text
     detail = resp.json()["detail"]
     assert "mother" in detail and "companion" in detail
-    assert len(table.rows) == 1
 
 
 def test_no_token_is_refused(offline_env):

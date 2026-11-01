@@ -49,6 +49,19 @@ Each file is `{"_fixture": {endpoint, captured, note}, "payload": …}`. Load it
 with `captured("name")` from `tests/conftest.py`; use `captured_empty("name")`
 for the 204 cases so a test cannot quietly assume a 200 body.
 
+## Known capture gaps
+
+**Journals PATCH / DELETE success shapes are not captured yet.** Tickets 05
+and 06 added `PATCH` and `DELETE /rest/v1/journals` with
+`Prefer: return=representation`, and the offline fake encodes the *status*
+those return (200 + array; 204 + empty body for a no-match delete) without a
+captured body behind it. The live suites assert the behaviour
+(`test_edit_journal_live.py`, `test_delete_journal_live.py`), so the
+assumption is checked against the real project rather than trusted — but no
+file records *when* the shape was last seen. Capture one when the local stack
+is next up, per the procedure above. Do not hand-write it: an invented
+success body is the failure mode this whole section exists to prevent.
+
 When the `select` list changes, capture a **new** dated file — never edit an
 existing one. The date is the only signal that a fixture may predate an API
 change, and an edited file lies about when it was taken.
