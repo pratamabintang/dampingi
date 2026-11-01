@@ -11,7 +11,7 @@ mapping. Only the socket is faked.
 `msg`, and the code's branches already bound the vocabulary. There is nothing
 to invent, so `supabase_error(...)` builds them inline.
 
-The vocabulary is capped at the seven cases the code distinguishes:
+The vocabulary is capped at the cases the code distinguishes:
 
 | `error_code` / condition | Where the code reacts |
 |---|---|
@@ -22,9 +22,17 @@ The vocabulary is capped at the seven cases the code distinguishes:
 | 429 (any code) | password verification → 503, never "wrong password" |
 | 503 with no `error_code` | transport failure (`is_transport`) → 503 |
 | 404 empty array from PostgREST | `update_profile_name` → 503, never a false 200 |
+| `23505` (unique violation) | `create_mood` / `create_journal` → 409, naming the day |
+| `23503` (FK violation) | *not* a duplicate: falls through to 503 |
 
-Adding an eighth means the code grew a branch — not that these helpers should
-get cleverer.
+The last two are the pair that matters. PostgREST answers **409** for both, so
+keying on the HTTP status would report a foreign-key violation — a Profile
+hard-deleted between the guard and the insert — as "you already recorded
+today": a false statement, and a 409 tells a client not to retry a write that
+never landed. Both domains key on the SQLSTATE in the body's `code` instead.
+
+Adding a case means the code grew a branch — not that these helpers should get
+cleverer.
 
 **Success payloads — captured, never invented.** Inventing response *shape* is
 exactly how four real bugs were missed (`PUT /auth/v1/user` returning no access

@@ -202,5 +202,11 @@ def delete_mood(user_id: str, created_at: str) -> bool:
 
     Returns True if an entry was deleted, False if no entry existed.
     Idempotent: deleting a non-existent entry is not an error.
+
+    Raises InvalidDate on a malformed date, so a typo is the caller's 400
+    rather than a rejected SQL literal surfacing as a 503 "outage". Every
+    other verb validates the date first; delete doing so too keeps the
+    contract uniform.
     """
+    _parse_date(created_at)
     return supabase.delete_mood(user_id, created_at)

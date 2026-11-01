@@ -2,6 +2,10 @@
 
 import pytest
 
+from tests.conftest import captured
+
+PROFILE = {**captured("profiles-select-2026-11-01"), "role": "mother"}
+
 
 @pytest.mark.live
 def test_get_mood(client, register):
@@ -123,3 +127,50 @@ def test_list_moods_with_range(client, register):
     assert resp.status_code == 200
     body = resp.json()
     assert body["count"] == 3
+
+
+def test_a_start_date_filter_excludes_older_moods(mock_client, moods_table):
+    """The date range is filtered by the upstream, and the fake honours it.
+
+    `list_moods` sends `created_at=gte.<start_date>`, so the transport's
+    filtering is real and not done client-side. The canned table applies that
+    operator as PostgREST does; a fake that only understood `eq.` would answer
+    every ranged list with an empty array, which would agree with a transport
+    that had stopped filtering at all.
+    """
+    client, session = mock_client
+    moods_table(
+        PROFILE,
+        moods=[
+            {
+                "user_id": session.user_id,
+                "created_at": "2026-10-26",
+                "mood": 2,
+                "description": None,
+            },
+            {
+                "user_id": session.user_id,
+                "created_at": "2026-10-29",
+                "mood": 4,
+                "description": None,
+            },
+            {
+                "user_id": session.user_id,
+                "created_at": "2026-10-30",
+                "mood": 5,
+                "description": None,
+            },
+        ],
+    )
+
+    resp = client.get(
+        "/moods",
+        headers={"Authorization": f"Bearer {session.token}"},
+        params={"start_date": "2026-10-29"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # 2026-10-26 is older than the start date and must be excluded.
+    assert [m["created_at"] for m in body["moods"]] == ["2026-10-30", "2026-10-29"]
+    assert body["count"] == 2

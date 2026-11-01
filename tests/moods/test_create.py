@@ -11,13 +11,9 @@ Mood for the same day, so a duplicate test written against it could never
 fail.
 """
 
-import json
-
 import pytest
 
 from tests.conftest import captured, supabase_json
-
-AUTH = {"Authorization": "Bearer offline-token"}
 
 # Captured from the real project, with the timezone column.
 PROFILE = {**captured("profiles-select-2026-11-01"), "role": "mother"}
@@ -185,7 +181,6 @@ def test_a_foreign_key_violation_is_not_reported_as_a_duplicate(
         json={"created_at": "2026-10-30", "mood": 4},
     )
 
-    assert resp.status_code != 409, resp.text
     assert resp.status_code == 503, resp.text
 
 
