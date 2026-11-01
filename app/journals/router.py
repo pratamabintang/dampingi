@@ -1,11 +1,16 @@
 """API surface of the journals domain: routes, status codes, token auth."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.auth import service as auth_service
 from app.auth.guards import require_any_role
 from app.journals import service, supabase
-from app.journals.schemas import JournalCreate, JournalListOut, JournalOut
+from app.journals.schemas import (
+    JournalCreate,
+    JournalListOut,
+    JournalOut,
+    JournalUpdate,
+)
 
 router = APIRouter(tags=["journals"])
 
@@ -40,6 +45,11 @@ def _handle_journal_errors(func, *args):
         )
     except service.JournalNotFound:
         raise HTTPException(status_code=404, detail="Journal not found")
+    except service.JournalNothingToUpdate:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a title, a content, or both to edit a Journal",
+        )
     except supabase.SupabaseError as exc:
         raise HTTPException(status_code=503, detail=exc.message)
 
@@ -83,6 +93,53 @@ def list_journals(
 ) -> JournalListOut:
     journals = _handle_journal_errors(service.list_journals, session.user_id)
     return JournalListOut(journals=journals, count=len(journals))
+
+
+@router.patch(
+    "/journals/{created_at}",
+    response_model=JournalOut,
+    summary="Edit the Journal for a day",
+    description=(
+        "Change the title, the content, or both. The day is fixed when a "
+        "Journal is written: a `created_at` in the payload is ignored, and "
+        "the entry never moves. A day with no Journal for this Author is "
+        "reported as not found, so another Author's entry stays invisible."
+    ),
+)
+def update_journal(
+    created_at: str,
+    payload: JournalUpdate,
+    session: auth_service.Session = Depends(mother_or_companion),
+) -> JournalOut:
+    return _handle_journal_errors(
+        service.update_journal,
+        session.user_id,
+        created_at,
+        payload.title,
+        payload.content,
+    )
+
+
+@router.delete(
+    "/journals/{created_at}",
+    status_code=204,
+    summary="Delete the Journal for a day",
+    description=(
+        "Removes this Author's Journal for that day. Not idempotent: a day "
+        "with no Journal for this Author is reported as not found, so a "
+        "delete confirms nothing about another Author's entries."
+    ),
+)
+def delete_journal(
+    created_at: str,
+    session: auth_service.Session = Depends(mother_or_companion),
+) -> Response:
+    _handle_journal_errors(
+        service.delete_journal,
+        session.user_id,
+        created_at,
+    )
+    return Response(status_code=204)
 
 
 @router.get(

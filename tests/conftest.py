@@ -348,6 +348,138 @@ def as_author():
 
 
 @pytest.fixture
+def journals_table(upstream):
+    """A canned Supabase holding a real Journals table, behaving like PostgREST.
+
+    Shared by the write, edit, and delete suites. Each needs a table that
+    actually holds rows across Authors, applies the `user_id` filter, honours
+    `select`, and mutates. A per-module copy is a copy that drifts, and a fake
+    that ignores the filter makes every privacy test unfalsifiable (ADR-0006).
+
+    `journals` is the whole table, every Author's rows. Mutations persist for
+    the life of the test, so "write, edit, read back" is one table rather than
+    three independent stubs.
+
+    Modelled deliberately, each part for a reason:
+
+    - `select` is honoured, so a transport asking for a column that is not
+      there fails loudly instead of returning an invented default.
+    - `user_id` is a filter, never a suggestion: a transport that stopped
+      scoping by Author would return a stranger's Journal here.
+    - PATCH and DELETE answer with the rows they matched, as PostgREST does
+      under `Prefer: return=representation`. Without that, "matched nothing"
+      and "matched the row" are indistinguishable, and the 404-on-missing
+      rule could never be tested.
+    - DELETE without that header answers 204 with no body, as PostgREST
+      really does, so a transport that forgot to ask for the rows cannot
+      learn whether anything matched.
+    - The date is applied verbatim from the PATCH body rather than protected
+      here: PostgREST would move it too, so a transport that wrongly forwards
+      `created_at` must fail the date-immutability test rather than be
+      quietly corrected by the fake.
+    """
+    import json
+
+    import httpx
+
+    def _use(profile, journals=None):
+        rows = list(journals or [])
+
+        def _match(request, table):
+            wanted_user = request.url.params.get("user_id")
+            wanted_day = request.url.params.get("created_at")
+            return [
+                row
+                for row in table
+                if (
+                    wanted_user is None
+                    or row["user_id"] == wanted_user.removeprefix("eq.")
+                )
+                and (
+                    wanted_day is None
+                    or row["created_at"] == wanted_day.removeprefix("eq.")
+                )
+            ]
+
+        def _select(request, matched):
+            asked = request.url.params["select"].split(",")
+            return [{k: row[k] for k in asked if k in row} for row in matched]
+
+        def profile_get(request):
+            asked = request.url.params["select"].split(",")
+            return supabase_json(
+                200, [{k: profile[k] for k in asked if k in profile}]
+            )
+
+        def journal_get(request):
+            hits = _match(request, rows)
+            order = request.url.params.get("order")
+            if order == "created_at.desc":
+                hits = sorted(hits, key=lambda r: r["created_at"], reverse=True)
+            elif order == "created_at.asc":
+                hits = sorted(hits, key=lambda r: r["created_at"])
+            offset = int(request.url.params.get("offset", 0))
+            limit = int(request.url.params.get("limit", len(hits) or 1))
+            return supabase_json(200, _select(request, hits[offset : offset + limit]))
+
+        def journal_post(request):
+            body = json.loads(request.content)
+            # The composite key is enforced here because the table enforces
+            # it: a fake that appended blindly would answer 201 to a second
+            # Journal for the same day, so a duplicate test written against
+            # it could never fail.
+            clash = [
+                row
+                for row in rows
+                if row["user_id"] == body["user_id"]
+                and row["created_at"] == body["created_at"]
+            ]
+            if clash:
+                return httpx.Response(
+                    409,
+                    json={
+                        "code": "23505",
+                        "details": "Key (user_id, created_at) already exists.",
+                        "message": "duplicate key value violates unique constraint",
+                    },
+                )
+            rows.append(body)
+            return supabase_json(201, [body])
+
+        def journal_patch(request):
+            hits = _match(request, rows)
+            body = json.loads(request.content)
+            for row in hits:
+                row.update(body)
+            return supabase_json(200, _select(request, hits))
+
+        def journal_delete(request):
+            hits = _match(request, rows)
+            for row in hits:
+                rows.remove(row)
+            if "return=representation" in (request.headers.get("prefer") or ""):
+                return supabase_json(200, _select(request, hits))
+            return httpx.Response(204, content=b"")
+
+        recorded = upstream(
+            {
+                ("GET", "/rest/v1/profiles"): profile_get,
+                ("GET", "/rest/v1/journals"): journal_get,
+                ("POST", "/rest/v1/journals"): journal_post,
+                ("PATCH", "/rest/v1/journals"): journal_patch,
+                ("DELETE", "/rest/v1/journals"): journal_delete,
+            }
+        )
+        # Exposed so a test can assert on the table itself after a call:
+        # "the other Author's entry survived" is a claim about stored data,
+        # not just about a response.
+        recorded.rows = rows
+        return recorded
+
+    return _use
+
+
+@pytest.fixture
 def mock_client(offline_env):
     """A TestClient that needs no credentials and no network.
 

@@ -71,6 +71,65 @@ def fetch_journal(user_id: str, created_at: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def update_journal(user_id: str, created_at: str, changes: dict) -> dict | None:
+    """Edit this Author's Journal for a day.
+
+    `changes` holds only the columns to write. It never carries `user_id` or
+    `created_at`: both come from this function's arguments, and `created_at`
+    is a filter rather than a value to set, so an edit cannot move a Journal
+    to another day even if a caller asked it to.
+
+    Returns the updated row, or None when nothing matched — which is both
+    "this Author has no Journal that day" and "that day belongs to someone
+    else". PostgREST answers 200 with an empty array for a PATCH that matched
+    no rows, so the returned rows are the only signal.
+    """
+    resp = _request(
+        _client().patch,
+        f"{_base_url()}/rest/v1/journals",
+        params={
+            "user_id": f"eq.{user_id}",
+            "created_at": f"eq.{created_at}",
+            "select": _COLUMNS,
+        },
+        headers={**supabase_service_http(), "Prefer": "return=representation"},
+        json=changes,
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+    rows = resp.json()
+    return rows[0] if rows else None
+
+
+def delete_journal(user_id: str, created_at: str) -> bool:
+    """Delete this Author's Journal for a day.
+
+    Returns True when a row was deleted, False when nothing matched — which
+    is both "no Journal that day" and "that day belongs to someone else".
+
+    Asks for the deleted rows back (`Prefer: return=representation`) rather
+    than trusting the status code. PostgREST answers a DELETE that matched
+    nothing with **204 as well**, so a bare 204 cannot tell "deleted" from
+    "was never there", and ticket 06 needs that distinction to answer 404.
+    """
+    resp = _request(
+        _client().delete,
+        f"{_base_url()}/rest/v1/journals",
+        params={
+            "user_id": f"eq.{user_id}",
+            "created_at": f"eq.{created_at}",
+            "select": _COLUMNS,
+        },
+        headers={**supabase_service_http(), "Prefer": "return=representation"},
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+    rows = resp.json()
+    return bool(rows)
+
+
 # PostgREST answers at most PGRST_DB_MAX_ROWS rows per response and does not
 # say when it truncated. Reading every page is what makes "all of this
 # Author's Journals" true rather than "the newest N".

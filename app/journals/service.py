@@ -39,7 +39,14 @@ class JournalProfileNotFound(Exception):
 
 
 class JournalNotFound(Exception):
-    """No Journal exists for this Author on this day."""# Postgres SQLSTATE for a unique violation. PostgREST forwards it as the
+    """No Journal exists for this Author on this day."""
+
+
+class JournalNothingToUpdate(Exception):
+    """An edit supplied neither a title nor a content."""
+
+
+# Postgres SQLSTATE for a unique violation. PostgREST forwards it as the
 # body's `code`, so a duplicate day is distinguishable without matching on
 # prose.
 #
@@ -159,6 +166,69 @@ def get_journal(user_id: str, created_at: str) -> JournalOut:
     if not row:
         raise JournalNotFound()
     return _to_out(row)
+
+
+def update_journal(
+    user_id: str,
+    created_at: str,
+    title: Optional[str] = None,
+    content: Optional[str] = None,
+) -> JournalOut:
+    """Edit this Author's Journal for a day.
+
+    Only the title and the content may change. The day is fixed when the
+    Journal is written, so nothing here can move it to another day.
+
+    Raises JournalInvalidDate on a malformed date, JournalNothingToUpdate when
+    neither field was supplied, JournalNotFound when this Author has no
+    Journal that day (which is also the answer for another Author's Journal),
+    JournalProfileNotFound for a tombstoned Profile, or SupabaseError on a
+    transport failure.
+    """
+    day = _parse_date(created_at).isoformat()
+
+    changes = {}
+    if title is not None:
+        changes["title"] = title
+    if content is not None:
+        changes["content"] = content
+    if not changes:
+        raise JournalNothingToUpdate()
+
+    # A tombstoned Profile cannot act (ADR-0003). Checked before the write so
+    # a live token outliving the deletion cannot still edit entries.
+    profile = auth_supabase.fetch_profile(user_id)
+    if not profile or profile.get("deleted_at"):
+        raise JournalProfileNotFound()
+
+    # PostgREST answers a PATCH that matched nothing with 200 and an empty
+    # array, so an empty result is the only signal that there was no row.
+    row = supabase.update_journal(user_id, day, changes)
+    if not row:
+        raise JournalNotFound()
+    return _to_out(row)
+
+
+def delete_journal(user_id: str, created_at: str) -> None:
+    """Delete this Author's Journal for a day.
+
+    Raises JournalInvalidDate on a malformed date, JournalProfileNotFound for
+    a tombstoned Profile, JournalNotFound when this Author has no Journal
+    that day (which is also the answer for another Author's Journal), or
+    SupabaseError on a transport failure.
+    """
+    day = _parse_date(created_at).isoformat()
+
+    # A tombstoned Profile cannot act (ADR-0003). Checked before the write so
+    # a live token outliving the deletion cannot still destroy entries.
+    profile = auth_supabase.fetch_profile(user_id)
+    if not profile or profile.get("deleted_at"):
+        raise JournalProfileNotFound()
+
+    # Deliberately not idempotent, unlike moods: ticket 06 asks for 404 when
+    # there was nothing to delete, so the caller is not told a no-op worked.
+    if not supabase.delete_journal(user_id, day):
+        raise JournalNotFound()
 
 
 def list_journals(user_id: str) -> list[JournalOut]:

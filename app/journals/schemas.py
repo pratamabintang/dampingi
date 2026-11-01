@@ -47,6 +47,41 @@ class JournalOut(BaseModel):
     content: str
 
 
+class JournalUpdate(BaseModel):
+    """Edit a Journal: a new title, new content, or both.
+
+    The day is not part of an edit. `created_at` is accepted and ignored so
+    a client can round-trip a Journal body back without having to strip the
+    date first; the entry stays on the day named in the URL, because editing
+    is not a way to move an entry to another day.
+
+    Every other unknown field is refused: a typo'd key would otherwise look
+    like a successful edit that changed nothing.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    title: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=TITLE_MAX,
+        description="New title (1-255 chars). Omit to leave it unchanged.",
+    )
+    content: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=CONTENT_MAX,
+        description="New content (1-10000 chars). Omit to leave it unchanged.",
+    )
+    created_at: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ignored. A Journal's day is fixed when it is written; the day "
+            "in the URL is the one that is edited."
+        ),
+    )
+
+
 class JournalListOut(BaseModel):
     """An Author's Journals, newest first.
 
