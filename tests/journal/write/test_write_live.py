@@ -129,6 +129,26 @@ def test_a_malformed_date_is_refused(client, register):
     assert resp.status_code == 400, resp.text
 
 
+def test_backfilling_the_same_past_day_twice_conflicts(client, register):
+    """A backfilled day holds one Journal, same as today does.
+
+    The offline suite asserts this against a fake that enforces the key;
+    this is the authority on what the real table does.
+    """
+    _, _, token = register(role="mother")
+    day = {"title": "Catching up", "content": "x", "created_at": "2026-10-25"}
+
+    first = client.post("/journals", headers=_headers(token), json=day)
+    assert first.status_code == 201, first.text
+
+    second = client.post(
+        "/journals", headers=_headers(token), json={**day, "title": "Again"}
+    )
+
+    assert second.status_code == 409, second.text
+    assert "2026-10-25" in second.json()["detail"]
+
+
 def test_a_past_day_may_be_backfilled(client, register):
     _, _, token = register(role="mother")
 

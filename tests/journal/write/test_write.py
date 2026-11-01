@@ -53,6 +53,18 @@ def _postgrest(upstream, profile, journals=None, fail_insert=None):
         if fail_insert is not None:
             return fail_insert()
         body = json.loads(request.content)
+        # Enforce the composite key the way the table does. A fake that
+        # appended blindly would answer 201 to a second Journal for the
+        # same day, so a duplicate test written against it could never
+        # fail — it would be asserting the fake's optimism, not the API.
+        clash = [
+            row
+            for row in rows
+            if row["user_id"] == body["user_id"]
+            and row["created_at"] == body["created_at"]
+        ]
+        if clash:
+            return _conflict("23505")
         rows.append(body)
         return supabase_json(201, [body])
 
@@ -341,6 +353,63 @@ def test_a_past_date_is_accepted(mock_client, upstream):
 
     assert resp.status_code == 201, resp.text
     assert resp.json()["created_at"] == "2026-10-25"
+
+
+def test_backfilling_the_same_past_day_twice_is_a_conflict(mock_client, upstream):
+    """A backfilled day is a day like any other: it holds one Journal.
+
+    Nothing about an explicit past date weakens the one-per-day rule. The
+    second write is refused, and the message names the day that collided
+    rather than today's.
+    """
+    client, _ = mock_client
+    _postgrest(upstream, {**PROFILE, "role": "mother"})
+
+    first = client.post(
+        "/journals",
+        headers=AUTH,
+        json={"title": "Catching up", "content": "x", "created_at": "2026-10-25"},
+    )
+    assert first.status_code == 201, first.text
+
+    second = client.post(
+        "/journals",
+        headers=AUTH,
+        json={"title": "Again", "content": "y", "created_at": "2026-10-25"},
+    )
+
+    assert second.status_code == 409, second.text
+    # The colliding day is the backfilled one, not the server's today.
+    assert "2026-10-25" in second.json()["detail"]
+
+
+def test_two_authors_may_both_backfill_the_same_past_day(
+    mock_client, upstream, real_gate
+):
+    """The one-per-day rule is per Author, so backfilling is not contended.
+
+    Runs through the real gate because the session has to actually change;
+    under the permissive override both writes would be the same Author and
+    the second would be a legitimate 409.
+    """
+    client, _ = mock_client
+    _postgrest(upstream, {**PROFILE, "role": "mother"})
+
+    _as(PROFILE["user_id"])
+    mine = client.post(
+        "/journals",
+        headers=AUTH,
+        json={"title": "Mine", "content": "x", "created_at": "2026-10-25"},
+    )
+    assert mine.status_code == 201, mine.text
+
+    _as(OTHER)
+    theirs = client.post(
+        "/journals",
+        headers=AUTH,
+        json={"title": "Theirs", "content": "y", "created_at": "2026-10-25"},
+    )
+    assert theirs.status_code == 201, theirs.text
 
 
 def test_an_empty_title_is_refused(mock_client, upstream):
