@@ -80,34 +80,21 @@ _PAGE_SIZE = 1000
 _MAX_PAGES = 200
 
 
-def list_moods(user_id: str, start_date: str | None = None, end_date: str | None = None) -> list:
-    """List mood entries for a user with optional date range.
+def list_moods_all(
+    user_id: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> tuple[list, int]:
+    """List all mood entries for a user with optional date range (no pagination).
 
-    start_date and end_date are YYYY-MM-DD strings (inclusive). If omitted,
-    all entries are returned. Results ordered by created_at desc (newest first).
-    Returns empty list if no entries found.
+    Returns entire result set in a single response. start_date and end_date are
+    YYYY-MM-DD strings (inclusive). Results ordered by created_at desc (newest first).
+    Returns (rows, total_count).
 
-    Both bounds are pushed down to the query, as two `created_at` conditions
-    that PostgREST applies together. `end_date` used to be filtered in Python
-    after the fetch, which was silently wrong once an Author had more moods
-    than one response can carry: the fetch returns the newest `max_rows`, so a
-    range pointing at older days was filtered over the wrong window and
-    answered [] or a partial list.
-
-    Paged for the same reason the journals list is: a single response is
-    capped at PGRST_DB_MAX_ROWS with no truncation signal, and a truncated
-    list is a false answer to "list my moods". Termination is the first
-    *empty* page, never a short one — the cap is configured on the server, so
-    a lower cap would make every page short and a short-page check would stop
-    after the first.
-
-    Raises SupabaseError on a transport failure, or when paging never reaches
-    an empty page.
+    Paged internally to respect PostgREST row cap, but returns all collected rows.
+    Raises SupabaseError on a transport failure.
     """
     filters = {"user_id": f"eq.{user_id}"}
-    # Repeated keys, not a dict entry: a closed range needs `gte.` and `lte.`
-    # on the same column and PostgREST applies every condition it is given.
-    # httpx accepts a list of tuples for exactly this.
     conditions: list[tuple[str, str]] = []
     if start_date:
         conditions.append(("created_at", f"gte.{start_date}"))
@@ -137,7 +124,7 @@ def list_moods(user_id: str, start_date: str | None = None, end_date: str | None
 
         page = resp.json()
         if not page:
-            return collected
+            return collected, len(collected)
 
         collected.extend(page)
         offset += len(page)
@@ -147,6 +134,71 @@ def list_moods(user_id: str, start_date: str | None = None, end_date: str | None
         f"Listing moods did not terminate after {_MAX_PAGES} pages; "
         "the upstream appears to be ignoring the offset parameter",
     )
+
+
+
+def list_moods(
+    user_id: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list, int]:
+    """List mood entries for a user with optional date range and pagination.
+
+    start_date and end_date are YYYY-MM-DD strings (inclusive). If omitted,
+    all entries are returned. Results ordered by created_at desc (newest first).
+    Returns (rows, total_count) where total_count is across all matching records.
+
+    Both bounds are pushed down to the query, as two `created_at` conditions
+    that PostgREST applies together.
+
+    Raises SupabaseError on a transport failure.
+    """
+    filters = {"user_id": f"eq.{user_id}"}
+    conditions: list[tuple[str, str]] = []
+    if start_date:
+        conditions.append(("created_at", f"gte.{start_date}"))
+    if end_date:
+        conditions.append(("created_at", f"lte.{end_date}"))
+
+    # Fetch total count with same filters
+    count_resp = _request(
+        _client().get,
+        f"{_base_url()}/rest/v1/moods",
+        params=[
+            *filters.items(),
+            ("select", "count"),
+            *conditions,
+        ],
+        headers={**supabase_service_http(), "Prefer": "count=exact"},
+        timeout=TIMEOUT,
+    )
+    if count_resp.status_code >= 400:
+        raise _error_from_response(count_resp)
+    
+    total = int(count_resp.headers.get("content-range", "0/0").split("/")[1])
+
+    # Fetch paginated results
+    resp = _request(
+        _client().get,
+        f"{_base_url()}/rest/v1/moods",
+        params=[
+            *filters.items(),
+            ("select", "user_id,created_at,mood,description"),
+            ("order", "created_at.desc"),
+            ("limit", str(limit)),
+            ("offset", str(offset)),
+            *conditions,
+        ],
+        headers=supabase_service_http(),
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+
+    rows = resp.json()
+    return rows, total
 
 
 def update_mood(user_id: str, created_at: str, mood: int | None = None, description: str | None = None) -> dict | None:

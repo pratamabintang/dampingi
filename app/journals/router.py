@@ -1,6 +1,8 @@
 """API surface of the journals domain: routes, status codes, token auth."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.auth import service as auth_service
 from app.auth.guards import require_any_role
@@ -81,18 +83,30 @@ def create_journal(
 @router.get(
     "/journals",
     response_model=JournalListOut,
-    summary="List my Journals",
+    summary="List my Journals with optional date range and pagination",
     description=(
-        "Every Journal this Author has written, newest first. The list is "
-        "scoped to the caller by construction: no parameter can widen it to "
-        "another Author. An Author with no Journals gets an empty list."
+        "Every Journal this Author has written, newest first. "
+        "Optional start_date and end_date filter by YYYY-MM-DD date range. "
+        "offset and limit enable pagination (default: no pagination, return all). "
+        "When provided, limit is capped at 100."
     ),
 )
 def list_journals(
     session: auth_service.Session = Depends(mother_or_companion),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    offset: Optional[int] = Query(None, ge=0, description="Number of results to skip (enables pagination)"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Number of results to return (max 100)"),
 ) -> JournalListOut:
-    journals = _handle_journal_errors(service.list_journals, session.user_id)
-    return JournalListOut(journals=journals, count=len(journals))
+    result = _handle_journal_errors(
+        service.list_journals,
+        session.user_id,
+        start_date,
+        end_date,
+        offset,
+        limit,
+    )
+    return result
 
 
 @router.patch(

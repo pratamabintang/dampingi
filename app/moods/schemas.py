@@ -40,7 +40,10 @@ class MoodOut(BaseModel):
 
 
 class MoodListOut(BaseModel):
-    """List of mood entries."""
+    """List of mood entries with pagination metadata."""
 
     moods: list[MoodOut]
-    count: int
+    count: int  # Number of entries in this page
+    offset: int  # Offset of this page
+    limit: int  # Page size
+    total: int  # Total entries matching the filter (all pages)

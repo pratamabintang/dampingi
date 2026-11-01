@@ -20,7 +20,7 @@ def test_an_author_with_no_journals_gets_an_empty_list(client, register):
     resp = client.get("/journals", headers=_headers(token))
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"journals": [], "count": 0}
+    assert resp.json() == {"journals": [], "count": 0, "offset": 0, "limit": 0, "total": 0}
 
 
 def test_listed_newest_first(client, register):
@@ -40,6 +40,7 @@ def test_listed_newest_first(client, register):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["count"] == 3
+    assert body["total"] == 3
     assert [j["created_at"] for j in body["journals"]] == [
         "2026-10-31",
         "2026-10-29",
@@ -64,6 +65,7 @@ def test_the_list_holds_only_the_callers_journals(client, register):
     assert alice_list.status_code == 200, alice_list.text
     alice_body = alice_list.json()
     assert alice_body["count"] == 1
+    assert alice_body["total"] == 1
     assert alice_body["journals"][0]["title"] == "Alice"
     assert alice_body["journals"][0]["user_id"] == alice_user["id"]
 
@@ -71,6 +73,7 @@ def test_the_list_holds_only_the_callers_journals(client, register):
     assert bob_list.status_code == 200, bob_list.text
     bob_body = bob_list.json()
     assert bob_body["count"] == 1
+    assert bob_body["total"] == 1
     assert bob_body["journals"][0]["title"] == "Bob"
     assert bob_body["journals"][0]["user_id"] == bob_user["id"]
 

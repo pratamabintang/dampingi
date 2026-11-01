@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.auth import supabase as auth_supabase
 from app.journals import supabase
-from app.journals.schemas import JournalOut
+from app.journals.schemas import JournalOut, JournalListOut
 from app.supabase import SupabaseError
 
 
@@ -241,13 +241,41 @@ def delete_journal(user_id: str, created_at: str) -> None:
         raise JournalNotFound()
 
 
-def list_journals(user_id: str) -> list[JournalOut]:
-    """Every Journal this Author has written, newest first.
+def list_journals(
+    user_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> JournalListOut:
+    """Every Journal this Author has written, newest first, with optional pagination.
 
-    There is no parameter that could widen this to another Author: the
-    transport is scoped to `user_id` and nothing here accepts a second
-    identity. An Author with no Journals gets an empty list.
-
-    Raises SupabaseError on a transport failure.
+    Scoped to `user_id`. Optional start_date and end_date filter by date range.
+    
+    If offset and limit are both None, returns all matching entries (backward compatible).
+    If either is provided, uses pagination. Returns result with total count.
+    
+    Raises SupabaseError on transport failure.
     """
-    return [_to_out(row) for row in supabase.list_journals(user_id)]
+    # If no pagination params, fetch all (backward compatible)
+    if offset is None and limit is None:
+        journals, total = supabase.list_journals_all(user_id, start_date, end_date)
+        return JournalListOut(
+            journals=[_to_out(row) for row in journals],
+            count=len(journals),
+            offset=0,
+            limit=len(journals),
+            total=len(journals),
+        )
+    
+    # Pagination mode
+    offset = offset or 0
+    limit = limit or 20
+    journals, total = supabase.list_journals(user_id, start_date, end_date, offset, limit)
+    return JournalListOut(
+        journals=[_to_out(row) for row in journals],
+        count=len(journals),
+        offset=offset,
+        limit=limit,
+        total=total,
+    )

@@ -154,24 +154,26 @@ _PAGE_SIZE = 1000
 _MAX_PAGES = 200
 
 
-def list_journals(user_id: str) -> list[dict]:
-    """Every Journal this Author has written, newest first.
+def list_journals_all(
+    user_id: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> tuple[list[dict], int]:
+    """Every Journal this Author has written, newest first (no pagination).
 
-    Scoped to `user_id`, so the list cannot hold another Author's rows.
+    Scoped to `user_id`. Optional start_date and end_date filter by date range.
+    Paged internally to respect PostgREST row cap, but returns all collected rows.
+    Returns (rows, total_count).
 
-    Paged rather than a single request: the upstream row cap would otherwise
-    truncate a long history silently, and a truncated history is a false
-    answer to "list my Journals".
-
-    Termination is the first *empty* page, deliberately not a short one. A
-    page shorter than `_PAGE_SIZE` proves nothing: the cap is configured on
-    the server (PGRST_DB_MAX_ROWS), not here, so a lower cap would make
-    every page short and a short-page test would stop after the first and
-    truncate exactly as before.
-
-    Raises SupabaseError on a transport failure, or when paging never
-    reaches an empty page.
+    Raises SupabaseError on a transport failure.
     """
+    filters = {"user_id": f"eq.{user_id}"}
+    conditions: list[tuple[str, str]] = []
+    if start_date:
+        conditions.append(("created_at", f"gte.{start_date}"))
+    if end_date:
+        conditions.append(("created_at", f"lte.{end_date}"))
+
     collected: list[dict] = []
     offset = 0
 
@@ -179,13 +181,14 @@ def list_journals(user_id: str) -> list[dict]:
         resp = _request(
             _client().get,
             f"{_base_url()}/rest/v1/journals",
-            params={
-                "user_id": f"eq.{user_id}",
-                "select": _COLUMNS,
-                "order": "created_at.desc",
-                "limit": _PAGE_SIZE,
-                "offset": offset,
-            },
+            params=[
+                *filters.items(),
+                ("select", _COLUMNS),
+                ("order", "created_at.desc"),
+                ("limit", str(_PAGE_SIZE)),
+                ("offset", str(offset)),
+                *conditions,
+            ],
             headers=supabase_service_http(),
             timeout=TIMEOUT,
         )
@@ -194,7 +197,7 @@ def list_journals(user_id: str) -> list[dict]:
 
         page = resp.json()
         if not page:
-            return collected
+            return collected, len(collected)
 
         collected.extend(page)
         offset += len(page)
@@ -204,3 +207,66 @@ def list_journals(user_id: str) -> list[dict]:
         f"Listing journals did not terminate after {_MAX_PAGES} pages; "
         "the upstream appears to be ignoring the offset parameter",
     )
+
+
+
+def list_journals(
+    user_id: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list[dict], int]:
+    """Every Journal this Author has written, newest first, with pagination.
+
+    Scoped to `user_id`, so the list cannot hold another Author's rows.
+
+    Optional start_date and end_date filter by date range (YYYY-MM-DD, inclusive).
+    Returns (rows, total_count) where total_count is across all matching records.
+
+    Raises SupabaseError on a transport failure.
+    """
+    filters = {"user_id": f"eq.{user_id}"}
+    conditions: list[tuple[str, str]] = []
+    if start_date:
+        conditions.append(("created_at", f"gte.{start_date}"))
+    if end_date:
+        conditions.append(("created_at", f"lte.{end_date}"))
+
+    # Fetch total count with same filters
+    count_resp = _request(
+        _client().get,
+        f"{_base_url()}/rest/v1/journals",
+        params=[
+            *filters.items(),
+            ("select", "count"),
+            *conditions,
+        ],
+        headers={**supabase_service_http(), "Prefer": "count=exact"},
+        timeout=TIMEOUT,
+    )
+    if count_resp.status_code >= 400:
+        raise _error_from_response(count_resp)
+    
+    total = int(count_resp.headers.get("content-range", "0/0").split("/")[1])
+
+    # Fetch paginated results
+    resp = _request(
+        _client().get,
+        f"{_base_url()}/rest/v1/journals",
+        params=[
+            *filters.items(),
+            ("select", _COLUMNS),
+            ("order", "created_at.desc"),
+            ("limit", str(limit)),
+            ("offset", str(offset)),
+            *conditions,
+        ],
+        headers=supabase_service_http(),
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise _error_from_response(resp)
+
+    rows = resp.json()
+    return rows, total

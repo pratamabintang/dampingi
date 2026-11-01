@@ -100,7 +100,7 @@ def test_an_author_with_no_journals_gets_an_empty_list(mock_client, upstream):
     resp = client.get("/journals", headers=AUTH)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"journals": [], "count": 0}
+    assert resp.json() == {"journals": [], "count": 0, "offset": 0, "limit": 0, "total": 0}
 
 def test_the_list_holds_only_the_requesting_authors_journals(mock_client, upstream):
     """Privacy: another Author's Journals never appear, even on shared dates."""
@@ -120,6 +120,7 @@ def test_the_list_holds_only_the_requesting_authors_journals(mock_client, upstre
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["count"] == 1
+    assert body["total"] == 1
     assert [j["title"] for j in body["journals"]] == ["Mine"]
     assert all(j["user_id"] == PROFILE["user_id"] for j in body["journals"])
 
@@ -200,6 +201,7 @@ def test_the_list_is_not_truncated_by_the_projects_row_cap(mock_client, upstream
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["count"] == total, "the row cap truncated the Author's history"
+    assert body["total"] == total
     assert body["journals"][0]["title"] == "Day 0"
     assert body["journals"][-1]["title"] == f"Day {total - 1}"
     # Still newest first across the page boundary.
@@ -241,6 +243,7 @@ def test_the_list_survives_a_server_cap_lower_than_the_page_size(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["count"] == total, "a short page was mistaken for the last page"
+    assert body["total"] == total
     days = [j["created_at"] for j in body["journals"]]
     assert days == sorted(days, reverse=True)
 

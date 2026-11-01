@@ -96,24 +96,29 @@ def get_mood(
 @router.get(
     "/moods",
     response_model=MoodListOut,
-    summary="List mood entries with optional date range",
+    summary="List mood entries with optional date range and pagination",
     description=(
         "Query parameters start_date and end_date are YYYY-MM-DD dates (optional). "
-        "Results are ordered newest first. Default: last 7 days."
+        "Results are ordered newest first. offset and limit enable pagination "
+        "(default: no pagination, return all). When provided, limit is capped at 100."
     ),
 )
 def list_moods(
     session: auth_service.Session = Depends(mother_only),
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    offset: Optional[int] = Query(None, ge=0, description="Number of results to skip (enables pagination)"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Number of results to return (max 100)"),
 ) -> MoodListOut:
-    moods = _handle_mood_errors(
+    result = _handle_mood_errors(
         service.list_moods,
         session.user_id,
         start_date,
         end_date,
+        offset,
+        limit,
     )
-    return MoodListOut(moods=moods, count=len(moods))
+    return result
 
 
 @router.patch(

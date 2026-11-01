@@ -10,7 +10,7 @@ from typing import Optional
 from app.auth import supabase as auth_supabase
 from app.moods import supabase
 from app.supabase import SupabaseError
-from app.moods.schemas import MoodOut
+from app.moods.schemas import MoodOut, MoodListOut
 
 
 class MoodFutureDate(Exception):
@@ -146,12 +146,21 @@ def get_mood(user_id: str, created_at: str) -> Optional[MoodOut]:
 
 
 def list_moods(
-    user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None
-) -> list[MoodOut]:
-    """List mood entries for a user within a date range (inclusive).
+    user_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> MoodListOut:
+    """List mood entries for a user within a date range with optional pagination.
 
     Both dates are optional. If provided, they must be YYYY-MM-DD format.
-    Results are ordered newest first. Raises InvalidDate on malformed dates.
+    Results are ordered newest first. 
+    
+    If offset and limit are both None, returns all matching entries (backward compatible).
+    If either is provided, uses pagination. Returns paginated results with total count.
+    
+    Raises InvalidDate on malformed dates.
     """
     # Validate date formats
     if start_date:
@@ -159,8 +168,31 @@ def list_moods(
     if end_date:
         _parse_date(end_date)
     
-    rows = supabase.list_moods(user_id, start_date, end_date)
-    return [
+    # If no pagination params, fetch all (backward compatible)
+    if offset is None and limit is None:
+        rows, total = supabase.list_moods_all(user_id, start_date, end_date)
+        moods = [
+            MoodOut(
+                user_id=row.get("user_id", ""),
+                created_at=row.get("created_at", ""),
+                mood=row.get("mood", 0),
+                description=row.get("description"),
+            )
+            for row in rows
+        ]
+        return MoodListOut(
+            moods=moods,
+            count=len(moods),
+            offset=0,
+            limit=len(moods),
+            total=len(moods),
+        )
+    
+    # Pagination mode
+    offset = offset or 0
+    limit = limit or 20
+    rows, total = supabase.list_moods(user_id, start_date, end_date, offset, limit)
+    moods = [
         MoodOut(
             user_id=row.get("user_id", ""),
             created_at=row.get("created_at", ""),
@@ -169,6 +201,14 @@ def list_moods(
         )
         for row in rows
     ]
+    
+    return MoodListOut(
+        moods=moods,
+        count=len(moods),
+        offset=offset,
+        limit=limit,
+        total=total,
+    )
 
 
 def update_mood(

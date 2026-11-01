@@ -83,13 +83,15 @@ class JournalUpdate(BaseModel):
 
 
 class JournalListOut(BaseModel):
-    """An Author's Journals, newest first.
+    """An Author's Journals, newest first, with pagination metadata.
 
-    Mirrors the moods list contract (`{moods, count}`) so a client reads both
-    domains the same way. `count` is the number of Journals in this response,
-    which is the Author's whole history — the transport pages through the
-    upstream row cap, so it is never a silently truncated window.
+    Mirrors the moods list contract so a client reads both domains the same way.
+    `count` is the number of Journals in this page. `total` is the Author's full
+    history matching any filters.
     """
 
     journals: list[JournalOut]
-    count: int
+    count: int  # Number of entries in this page
+    offset: int  # Offset of this page
+    limit: int  # Page size
+    total: int  # Total entries matching the filter (all pages)
