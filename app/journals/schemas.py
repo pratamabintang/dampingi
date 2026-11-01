@@ -45,3 +45,16 @@ class JournalOut(BaseModel):
     created_at: str  # YYYY-MM-DD date
     title: str
     content: str
+
+
+class JournalListOut(BaseModel):
+    """An Author's Journals, newest first.
+
+    Mirrors the moods list contract (`{moods, count}`) so a client reads both
+    domains the same way. `count` is the number of Journals in this response,
+    which is the Author's whole history — the transport pages through the
+    upstream row cap, so it is never a silently truncated window.
+    """
+
+    journals: list[JournalOut]
+    count: int

@@ -1,0 +1,15 @@
+{
+  "_fixture": {
+    "endpoint": "GET /rest/v1/journals?user_id=eq.<id>&select=user_id,created_at,title,content&order=created_at.desc&limit=1000&offset=0",
+    "captured": "2026-11-01",
+    "note": "The row shape list_journals reads. PostgREST returns an array, newest first, dates as YYYY-MM-DD strings. user_id scrubbed."
+  },
+  "payload": [
+    {
+      "user_id": "00000000-0000-4000-8000-0000000000a1",
+      "created_at": "2026-10-31",
+      "title": "A captured day",
+      "content": "Content captured from the real project."
+    }
+  ]
+}

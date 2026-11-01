@@ -309,6 +309,45 @@ def offline_env(monkeypatch):
 
 
 @pytest.fixture
+def real_gate(mock_client):
+    """Run journals tests through the real Mother-or-Companion gate.
+
+    `mock_client` overrides the gate so most tests can ignore authorization.
+    Tests *about* authorization must not, or they would be asserting against
+    a permissive stub. Shared here because every journals feature needs it:
+    a per-feature copy is a copy that drifts.
+    """
+    import app.main as main
+    from app.journals import router as journals_router
+
+    saved = main.app.dependency_overrides.pop(journals_router.mother_or_companion, None)
+    yield
+    if saved is not None:
+        main.app.dependency_overrides[journals_router.mother_or_companion] = saved
+
+
+@pytest.fixture
+def as_author():
+    """Point the app's session at a Profile, through the real gate.
+
+    The gate is *not* overridden here: `require_any_role` re-reads the
+    session, so swapping `verified_session` is enough and the real guard
+    still runs. Used with `real_gate` to test two Authors in one test.
+    """
+
+    def _as(user_id: str) -> None:
+        import app.main as main
+        from app.auth import service
+        from app.auth.router import verified_session
+
+        main.app.dependency_overrides[verified_session] = lambda: service.Session(
+            user_id=user_id, email="offline@gmail.com", token="offline-token"
+        )
+
+    return _as
+
+
+@pytest.fixture
 def mock_client(offline_env):
     """A TestClient that needs no credentials and no network.
 

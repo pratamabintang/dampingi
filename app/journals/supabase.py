@@ -69,3 +69,67 @@ def fetch_journal(user_id: str, created_at: str) -> dict | None:
         raise _error_from_response(resp)
     rows = resp.json()
     return rows[0] if rows else None
+
+
+# PostgREST answers at most PGRST_DB_MAX_ROWS rows per response and does not
+# say when it truncated. Reading every page is what makes "all of this
+# Author's Journals" true rather than "the newest N".
+_PAGE_SIZE = 1000
+
+# A ceiling on pages, so a upstream that ignores `offset` surfaces as an
+# error instead of an unbounded loop holding a request open. 200 pages is
+# 200,000 Journals: far past any real history, and a number only reached
+# when paging has stopped working.
+_MAX_PAGES = 200
+
+
+def list_journals(user_id: str) -> list[dict]:
+    """Every Journal this Author has written, newest first.
+
+    Scoped to `user_id`, so the list cannot hold another Author's rows.
+
+    Paged rather than a single request: the upstream row cap would otherwise
+    truncate a long history silently, and a truncated history is a false
+    answer to "list my Journals".
+
+    Termination is the first *empty* page, deliberately not a short one. A
+    page shorter than `_PAGE_SIZE` proves nothing: the cap is configured on
+    the server (PGRST_DB_MAX_ROWS), not here, so a lower cap would make
+    every page short and a short-page test would stop after the first and
+    truncate exactly as before.
+
+    Raises SupabaseError on a transport failure, or when paging never
+    reaches an empty page.
+    """
+    collected: list[dict] = []
+    offset = 0
+
+    for _ in range(_MAX_PAGES):
+        resp = _request(
+            _client().get,
+            f"{_base_url()}/rest/v1/journals",
+            params={
+                "user_id": f"eq.{user_id}",
+                "select": _COLUMNS,
+                "order": "created_at.desc",
+                "limit": _PAGE_SIZE,
+                "offset": offset,
+            },
+            headers=supabase_service_http(),
+            timeout=TIMEOUT,
+        )
+        if resp.status_code >= 400:
+            raise _error_from_response(resp)
+
+        page = resp.json()
+        if not page:
+            return collected
+
+        collected.extend(page)
+        offset += len(page)
+
+    raise SupabaseError(
+        500,
+        f"Listing journals did not terminate after {_MAX_PAGES} pages; "
+        "the upstream appears to be ignoring the offset parameter",
+    )

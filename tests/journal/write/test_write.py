@@ -13,8 +13,6 @@ is the one privacy guarantee this domain has.
 
 import json
 
-import pytest
-
 from tests.conftest import captured, supabase_json
 
 AUTH = {"Authorization": "Bearer offline-token"}
@@ -24,7 +22,6 @@ PROFILE = captured("profiles-select-2026-11-01")
 
 # Another real Profile, so the two-Author tests are two Authors.
 OTHER = "00000000-0000-4000-8000-0000000000f1"
-
 
 def _postgrest(upstream, profile, journals=None, fail_insert=None):
     """A canned Supabase that honours `select`, `user_id`, and inserts.
@@ -76,40 +73,6 @@ def _postgrest(upstream, profile, journals=None, fail_insert=None):
         }
     )
 
-
-def _as(user_id: str) -> None:
-    """Point the app's session at a Profile, through the real gate.
-
-    The gate is *not* overridden here: `require_any_role` re-reads the
-    session, so swapping `verified_session` is enough and the real guard
-    still runs.
-    """
-    import app.main as main
-    from app.auth import service
-    from app.auth.router import verified_session
-
-    main.app.dependency_overrides[verified_session] = lambda: service.Session(
-        user_id=user_id, email="offline@gmail.com", token="offline-token"
-    )
-
-
-@pytest.fixture
-def real_gate(mock_client):
-    """Run through the real Mother-or-Companion gate.
-
-    `mock_client` overrides the gate so most tests can ignore
-    authorization. Tests *about* authorization must not, or they would be
-    asserting against a permissive stub.
-    """
-    import app.main as main
-    from app.journals import router as journals_router
-
-    saved = main.app.dependency_overrides.pop(journals_router.mother_or_companion, None)
-    yield
-    if saved is not None:
-        main.app.dependency_overrides[journals_router.mother_or_companion] = saved
-
-
 def test_a_mother_writes_todays_journal_and_reads_it_back(mock_client, upstream):
     """The whole path: write a Journal, then read it back by date."""
     client, _ = mock_client
@@ -133,7 +96,6 @@ def test_a_mother_writes_todays_journal_and_reads_it_back(mock_client, upstream)
     assert read.status_code == 200, read.text
     assert read.json() == body
 
-
 def test_a_companion_passes_the_real_gate(mock_client, upstream, real_gate):
     """The real gate admits a Companion — the point of a multi-role gate."""
     client, _ = mock_client
@@ -146,7 +108,6 @@ def test_a_companion_passes_the_real_gate(mock_client, upstream, real_gate):
     )
 
     assert resp.status_code == 201, resp.text
-
 
 def test_a_professional_is_refused_by_the_real_gate(
     mock_client, upstream, real_gate
@@ -164,7 +125,6 @@ def test_a_professional_is_refused_by_the_real_gate(
     assert resp.status_code == 403, resp.text
     detail = resp.json()["detail"]
     assert "mother" in detail and "companion" in detail
-
 
 def test_another_authors_journal_is_not_found(mock_client, upstream):
     """Privacy: another Author's Journal is invisible, and reported as absent.
@@ -193,9 +153,8 @@ def test_another_authors_journal_is_not_found(mock_client, upstream):
     assert resp.status_code == 404, resp.text
     assert resp.status_code != 403
 
-
 def test_two_authors_hold_their_own_journal_on_the_same_day(
-    mock_client, upstream, real_gate
+    mock_client, upstream, real_gate, as_author
 ):
     """The key is per Author: two people, one day, two Journals.
 
@@ -218,16 +177,15 @@ def test_two_authors_hold_their_own_journal_on_the_same_day(
     }
     _postgrest(upstream, {**PROFILE, "role": "mother"}, journals=[theirs, mine])
 
-    _as(PROFILE["user_id"])
+    as_author(PROFILE["user_id"])
     first = client.get("/journals/2026-10-30", headers=AUTH)
     assert first.status_code == 200, first.text
     assert first.json()["title"] == "Mine"
 
-    _as(OTHER)
+    as_author(OTHER)
     second = client.get("/journals/2026-10-30", headers=AUTH)
     assert second.status_code == 200, second.text
     assert second.json()["title"] == "Theirs"
-
 
 def test_a_second_journal_for_the_same_day_is_a_conflict(mock_client, upstream):
     """The composite key refuses a second Journal, and the API says 409.
@@ -251,7 +209,6 @@ def test_a_second_journal_for_the_same_day_is_a_conflict(mock_client, upstream):
     assert resp.status_code == 409, resp.text
     # The message names the colliding day, so the client can act on it.
     assert "2026-11-01" in resp.json()["detail"]
-
 
 def test_a_foreign_key_violation_is_not_reported_as_a_duplicate(
     mock_client, upstream
@@ -278,7 +235,6 @@ def test_a_foreign_key_violation_is_not_reported_as_a_duplicate(
     assert resp.status_code != 409, resp.text
     assert resp.status_code == 503, resp.text
 
-
 def _conflict(code: str):
     import httpx
 
@@ -291,7 +247,6 @@ def _conflict(code: str):
             "message": "duplicate key value violates unique constraint",
         },
     )
-
 
 def test_a_soft_deleted_profile_may_not_write(mock_client, upstream):
     """A tombstoned Profile cannot act (ADR-0003)."""
@@ -309,7 +264,6 @@ def test_a_soft_deleted_profile_may_not_write(mock_client, upstream):
 
     assert resp.status_code == 404, resp.text
 
-
 def test_a_malformed_date_is_refused(mock_client, upstream):
     """A typo in the day is a 400, not a new Journal."""
     client, _ = mock_client
@@ -323,7 +277,6 @@ def test_a_malformed_date_is_refused(mock_client, upstream):
 
     assert resp.status_code == 400, resp.text
     assert "date" in resp.json()["detail"].lower()
-
 
 def test_a_future_date_is_refused(mock_client, upstream):
     """A Journal describes a day that has happened."""
@@ -339,7 +292,6 @@ def test_a_future_date_is_refused(mock_client, upstream):
     assert resp.status_code == 400, resp.text
     assert "future" in resp.json()["detail"].lower()
 
-
 def test_a_past_date_is_accepted(mock_client, upstream):
     """Backfilling a missed day is allowed."""
     client, _ = mock_client
@@ -353,7 +305,6 @@ def test_a_past_date_is_accepted(mock_client, upstream):
 
     assert resp.status_code == 201, resp.text
     assert resp.json()["created_at"] == "2026-10-25"
-
 
 def test_backfilling_the_same_past_day_twice_is_a_conflict(mock_client, upstream):
     """A backfilled day is a day like any other: it holds one Journal.
@@ -382,9 +333,8 @@ def test_backfilling_the_same_past_day_twice_is_a_conflict(mock_client, upstream
     # The colliding day is the backfilled one, not the server's today.
     assert "2026-10-25" in second.json()["detail"]
 
-
 def test_two_authors_may_both_backfill_the_same_past_day(
-    mock_client, upstream, real_gate
+    mock_client, upstream, real_gate, as_author
 ):
     """The one-per-day rule is per Author, so backfilling is not contended.
 
@@ -395,7 +345,7 @@ def test_two_authors_may_both_backfill_the_same_past_day(
     client, _ = mock_client
     _postgrest(upstream, {**PROFILE, "role": "mother"})
 
-    _as(PROFILE["user_id"])
+    as_author(PROFILE["user_id"])
     mine = client.post(
         "/journals",
         headers=AUTH,
@@ -403,14 +353,13 @@ def test_two_authors_may_both_backfill_the_same_past_day(
     )
     assert mine.status_code == 201, mine.text
 
-    _as(OTHER)
+    as_author(OTHER)
     theirs = client.post(
         "/journals",
         headers=AUTH,
         json={"title": "Theirs", "content": "y", "created_at": "2026-10-25"},
     )
     assert theirs.status_code == 201, theirs.text
-
 
 def test_an_empty_title_is_refused(mock_client, upstream):
     client, _ = mock_client
@@ -422,7 +371,6 @@ def test_an_empty_title_is_refused(mock_client, upstream):
 
     assert resp.status_code == 422, resp.text
 
-
 def test_an_overlong_title_is_refused(mock_client, upstream):
     client, _ = mock_client
     _postgrest(upstream, {**PROFILE, "role": "mother"})
@@ -432,7 +380,6 @@ def test_an_overlong_title_is_refused(mock_client, upstream):
     )
 
     assert resp.status_code == 422, resp.text
-
 
 def test_an_empty_content_is_refused(mock_client, upstream):
     client, _ = mock_client
@@ -444,7 +391,6 @@ def test_an_empty_content_is_refused(mock_client, upstream):
 
     assert resp.status_code == 422, resp.text
 
-
 def test_overlong_content_is_refused(mock_client, upstream):
     client, _ = mock_client
     _postgrest(upstream, {**PROFILE, "role": "mother"})
@@ -454,7 +400,6 @@ def test_overlong_content_is_refused(mock_client, upstream):
     )
 
     assert resp.status_code == 422, resp.text
-
 
 def test_an_unknown_field_is_refused(mock_client, upstream):
     """`created_at` is accepted; anything else is a mistake worth surfacing."""
@@ -469,32 +414,26 @@ def test_an_unknown_field_is_refused(mock_client, upstream):
 
     assert resp.status_code == 422, resp.text
 
-
-def test_no_token_is_refused():
+def test_no_token_is_refused(offline_env):
     """401 before anything else: no token, no Journal.
 
     Uses the real app without the offline session override — the override
     exists precisely so other tests can skip authentication, so it cannot
     be in play here. JWT verification rejects a missing token before any
     transport call, so this still needs no network.
+
+    `offline_env` supplies and restores the credentials rather than setting
+    them by hand: a bare os.environ write here would leak into later tests.
     """
     from fastapi.testclient import TestClient
 
     import app.main as main
-    from app.config import reset_settings
-    import os
-
-    os.environ.setdefault("SUPABASE_URL", "https://offline.supabase.test")
-    os.environ.setdefault("SUPABASE_PUBLISHABLE_KEY", "offline-publishable")
-    os.environ.setdefault("SUPABASE_SECRET_KEY", "offline-secret")
-    reset_settings()
 
     resp = TestClient(main.app).post(
         "/journals", json={"title": "x", "content": "y"}
     )
 
     assert resp.status_code == 401
-
 
 def test_an_unusable_timezone_falls_back_to_utc(mock_client, upstream):
     """A garbage timezone must not break writing a Journal (ADR-0007)."""
@@ -509,7 +448,6 @@ def test_an_unusable_timezone_falls_back_to_utc(mock_client, upstream):
 
     assert resp.status_code == 201, resp.text
     assert len(resp.json()["created_at"]) == 10
-
 
 def test_the_day_is_the_authors_local_one(mock_client, upstream):
     """The day comes from the Author's timezone, not the server's (ADR-0007).

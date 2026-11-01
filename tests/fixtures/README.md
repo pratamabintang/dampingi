@@ -37,6 +37,7 @@ success body encodes what we *believe* Supabase returns.
 | File | Endpoint | What it pins |
 |---|---|---|
 | `profiles-select-2026-11-01.json` | `GET /rest/v1/profiles` | The row shape `fetch_profile` reads, **with `timezone`** (added for Journals, ADR-0007); PostgREST returns an array |
+| `journals-select-2026-11-01.json` | `GET /rest/v1/journals` | The row shape `list_journals` reads: an array, newest first, `created_at` as a `YYYY-MM-DD` string. Captured for ticket 04 so the list fake builds rows from a real body instead of inventing one |
 | `profiles-select-2026-10-31.json` | `GET /rest/v1/profiles` | The older select, **without `timezone`**. Kept deliberately: a project whose `profiles` predates that column must still pass the role gate |
 | `profiles-patch-representation-2026-10-31.json` | `PATCH` with `Prefer: return=representation` | `update_profile_name`: 200 + one-element array |
 | `profiles-patch-tombstone-2026-10-31.json` | `PATCH` without `Prefer` | `tombstone_profile`: **204, empty body** |

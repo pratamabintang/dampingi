@@ -159,3 +159,15 @@ def get_journal(user_id: str, created_at: str) -> JournalOut:
     if not row:
         raise JournalNotFound()
     return _to_out(row)
+
+
+def list_journals(user_id: str) -> list[JournalOut]:
+    """Every Journal this Author has written, newest first.
+
+    There is no parameter that could widen this to another Author: the
+    transport is scoped to `user_id` and nothing here accepts a second
+    identity. An Author with no Journals gets an empty list.
+
+    Raises SupabaseError on a transport failure.
+    """
+    return [_to_out(row) for row in supabase.list_journals(user_id)]

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.auth import service as auth_service
 from app.auth.guards import require_any_role
 from app.journals import service, supabase
-from app.journals.schemas import JournalCreate, JournalOut
+from app.journals.schemas import JournalCreate, JournalListOut, JournalOut
 
 router = APIRouter(tags=["journals"])
 
@@ -66,6 +66,23 @@ def create_journal(
         payload.content,
         payload.created_at,
     )
+
+
+@router.get(
+    "/journals",
+    response_model=JournalListOut,
+    summary="List my Journals",
+    description=(
+        "Every Journal this Author has written, newest first. The list is "
+        "scoped to the caller by construction: no parameter can widen it to "
+        "another Author. An Author with no Journals gets an empty list."
+    ),
+)
+def list_journals(
+    session: auth_service.Session = Depends(mother_or_companion),
+) -> JournalListOut:
+    journals = _handle_journal_errors(service.list_journals, session.user_id)
+    return JournalListOut(journals=journals, count=len(journals))
 
 
 @router.get(
