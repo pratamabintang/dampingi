@@ -1,0 +1,15 @@
+{
+  "_fixture": {
+    "captured": "2026-11-01",
+    "endpoint": "GET /rest/v1/profiles?select=user_id,name,deleted_at,role,timezone&user_id=eq.<id>",
+    "note": "PostgREST returns an array; the transport takes rows[0]. Fields are exactly what fetch_profile selects. Recaptured when `timezone` was added to that select for Journals (ADR-0007); the column has existed on profiles since 20261031000400 with default 'UTC'.",
+    "scrubbed": "tokens, emails, user ids replaced with placeholders"
+  },
+  "payload": {
+    "deleted_at": null,
+    "name": "Capture User",
+    "role": "mother",
+    "timezone": "UTC",
+    "user_id": "00000000-0000-4000-8000-000000000001"
+  }
+}

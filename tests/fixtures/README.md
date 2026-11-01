@@ -32,11 +32,12 @@ token; `scope=global` killing the caller's own session; Supabase's docs claiming
 "204 with no sessions"; a 429 surfacing as a wrong password). A hand-written
 success body encodes what we *believe* Supabase returns.
 
-## Captured fixtures (all 2026-10-31)
+## Captured fixtures
 
 | File | Endpoint | What it pins |
 |---|---|---|
-| `profiles-select-2026-10-31.json` | `GET /rest/v1/profiles` | The row shape `fetch_profile` reads; PostgREST returns an array |
+| `profiles-select-2026-11-01.json` | `GET /rest/v1/profiles` | The row shape `fetch_profile` reads, **with `timezone`** (added for Journals, ADR-0007); PostgREST returns an array |
+| `profiles-select-2026-10-31.json` | `GET /rest/v1/profiles` | The older select, **without `timezone`**. Kept deliberately: a project whose `profiles` predates that column must still pass the role gate |
 | `profiles-patch-representation-2026-10-31.json` | `PATCH` with `Prefer: return=representation` | `update_profile_name`: 200 + one-element array |
 | `profiles-patch-tombstone-2026-10-31.json` | `PATCH` without `Prefer` | `tombstone_profile`: **204, empty body** |
 | `admin-user-ban-2026-10-31.json` | `PUT /auth/v1/admin/users/<id>` | Ban returns the **full auth user**, not a stub |
@@ -46,6 +47,10 @@ success body encodes what we *believe* Supabase returns.
 Each file is `{"_fixture": {endpoint, captured, note}, "payload": …}`. Load it
 with `captured("name")` from `tests/conftest.py`; use `captured_empty("name")`
 for the 204 cases so a test cannot quietly assume a 200 body.
+
+When the `select` list changes, capture a **new** dated file — never edit an
+existing one. The date is the only signal that a fixture may predate an API
+change, and an edited file lies about when it was taken.
 
 To capture one:
 

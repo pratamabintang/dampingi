@@ -105,17 +105,21 @@ def update_password(user_token: str, new_password: str) -> None:
 
 
 def fetch_profile(user_id: str) -> Optional[dict]:
-    """Read a profiles row via PostgREST (`columns=user_id,name,deleted_at,role`).
+    """Read a profiles row via PostgREST (`select=user_id,name,deleted_at,role,timezone`).
 
     Returns None when no row exists for the user (e.g. the setup trigger
     was not installed yet), rather than raising.
+
+    `timezone` is the IANA zone the Profile registered with (defaults to
+    'UTC'); PostgREST returns only the columns named here, so a caller
+    that needs the zone must get it from this select.
     """
     resp = _request(
         _client().get,
         f"{_base_url()}/rest/v1/profiles",
         params={
             "user_id": f"eq.{user_id}",
-            "select": "user_id,name,deleted_at,role",
+            "select": "user_id,name,deleted_at,role,timezone",
         },
         headers=supabase_service_http(),
         timeout=TIMEOUT,
