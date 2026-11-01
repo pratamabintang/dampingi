@@ -1,0 +1,16 @@
+{
+  "_fixture": {
+    "endpoint": "DELETE /rest/v1/journals (Prefer: return=representation)",
+    "captured": "2026-11-01",
+    "note": "200 with the deleted rows - not 204. Asking for the representation is what makes 'deleted' distinguishable from 'never there'. Captured status: 200.",
+    "scrubbed": "user_id replaced with a placeholder; no keys or tokens in the body"
+  },
+  "payload": [
+    {
+      "user_id": "00000000-0000-4000-8000-0000000000aa",
+      "created_at": "2026-10-30",
+      "title": "Edited",
+      "content": "After the edit."
+    }
+  ]
+}

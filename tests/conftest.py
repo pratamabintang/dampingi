@@ -393,7 +393,7 @@ def journal_row(user_id, day, title="A day", content="As written."):
 # name their table and row shape.
 
 
-def _canned_table(upstream, *, table, profile, rows, row_for=None):
+def _canned_table(upstream, *, table, profile, rows, row_for=None, max_rows=1000):
     """A canned Supabase holding `rows` for one PostgREST table.
 
     Modelled deliberately, each part for a reason:
@@ -403,8 +403,14 @@ def _canned_table(upstream, *, table, profile, rows, row_for=None):
     - `user_id` is a filter, never a suggestion: a transport that stopped
       scoping by user would return a stranger's row here.
     - `created_at` understands `eq.`, `gte.` and `lte.`, because the transports
-      send all three (`list_moods` filters with `gte.`).
+      send all three (`list_moods` filters with `gte.` and `lte.`). Repeats
+      are *conjunctive*: PostgREST applies every `created_at` condition it is
+      given, which is how a closed range is expressed.
     - `order` and `offset`/`limit` are applied, so paging can be exercised.
+    - `max_rows` stands in for PGRST_DB_MAX_ROWS (`supabase/config.toml` has
+      1000): a response is capped *whatever* `limit` asks for, and the cap is
+      silent. Without it a fake would hand back the whole table and agree with
+      a transport that had stopped paging — the truncation bug could not fail.
     - The composite key `(user_id, created_at)` is enforced because the tables
       enforce it. A fake that appended blindly would answer 201 to a second row
       for the same day, so a duplicate test written against it could never fail.
@@ -437,7 +443,9 @@ def _canned_table(upstream, *, table, profile, rows, row_for=None):
 
     def _match(request):
         wanted_user = request.url.params.get("user_id")
-        wanted_day = request.url.params.get("created_at")
+        # A closed range sends created_at twice (gte. and lte.). Every
+        # condition applies, so this is a conjunction, not "the first one".
+        wanted_days = request.url.params.get_list("created_at")
         return [
             row
             for row in stored
@@ -445,7 +453,7 @@ def _canned_table(upstream, *, table, profile, rows, row_for=None):
                 wanted_user is None
                 or row["user_id"] == wanted_user.removeprefix("eq.")
             )
-            and (wanted_day is None or _day_matches(row, wanted_day))
+            and all(_day_matches(row, wanted) for wanted in wanted_days)
         ]
 
     def _select(request, matched):
@@ -465,7 +473,11 @@ def _canned_table(upstream, *, table, profile, rows, row_for=None):
             hits = sorted(hits, key=lambda r: r["created_at"])
         offset = int(request.url.params.get("offset", 0))
         limit = int(request.url.params.get("limit", len(hits) or 1))
-        return supabase_json(200, _select(request, hits[offset : offset + limit]))
+        # The server's cap wins over whatever the caller asked for, and it
+        # does so silently — no header, no short-page signal.
+        return supabase_json(
+            200, _select(request, hits[offset : offset + min(limit, max_rows)])
+        )
 
     def table_post(request):
         body = json.loads(request.content)
@@ -572,12 +584,13 @@ def moods_table(upstream):
     stored row is normalised to the four columns the table actually has.
     """
 
-    def _use(profile, moods=None):
+    def _use(profile, moods=None, max_rows=1000):
         return _canned_table(
             upstream,
             table="moods",
             profile=profile,
             rows=moods or [],
+            max_rows=max_rows,
             row_for=lambda body: {
                 **mood_row(body["user_id"], body["created_at"]),
                 **body,

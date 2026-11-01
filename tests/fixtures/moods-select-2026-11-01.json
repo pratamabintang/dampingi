@@ -1,0 +1,22 @@
+{
+  "_fixture": {
+    "endpoint": "GET /rest/v1/moods?user_id=eq.<id>&select=user_id,created_at,mood,description&order=created_at.desc",
+    "captured": "2026-11-01",
+    "note": "The row shape list_moods and fetch_mood read: an array, newest first, created_at as a YYYY-MM-DD string. The second row never sent a description and comes back as null rather than absent. Captured status: 200.",
+    "scrubbed": "user_id replaced with a placeholder; no keys or tokens in the body"
+  },
+  "payload": [
+    {
+      "user_id": "00000000-0000-4000-8000-0000000000aa",
+      "created_at": "2026-10-30",
+      "mood": 4,
+      "description": "Captured."
+    },
+    {
+      "user_id": "00000000-0000-4000-8000-0000000000aa",
+      "created_at": "2026-10-29",
+      "mood": 2,
+      "description": null
+    }
+  ]
+}

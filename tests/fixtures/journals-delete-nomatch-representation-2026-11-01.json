@@ -1,0 +1,9 @@
+{
+  "_fixture": {
+    "endpoint": "DELETE /rest/v1/journals matching nothing (Prefer: return=representation)",
+    "captured": "2026-11-01",
+    "note": "200 with an empty array - NOT 204. The 204 that a no-match DELETE is known for is the answer when the header is absent; with return=representation the status is 200 and only the empty body distinguishes it from a real delete. Captured status: 200.",
+    "scrubbed": "no body content to scrub"
+  },
+  "payload": []
+}

@@ -1,0 +1,16 @@
+{
+  "_fixture": {
+    "endpoint": "PATCH /rest/v1/journals (Prefer: return=representation)",
+    "captured": "2026-11-01",
+    "note": "200 with a one-element array of the updated rows, carrying the select list. An edit that matched nothing answers 200 with an empty array - which is why update_journal reads the rows rather than the status. Captured status: 200.",
+    "scrubbed": "user_id replaced with a placeholder; no keys or tokens in the body"
+  },
+  "payload": [
+    {
+      "user_id": "00000000-0000-4000-8000-0000000000aa",
+      "created_at": "2026-10-30",
+      "title": "Edited",
+      "content": "After the edit."
+    }
+  ]
+}

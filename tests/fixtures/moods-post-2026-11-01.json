@@ -1,0 +1,16 @@
+{
+  "_fixture": {
+    "endpoint": "POST /rest/v1/moods (Prefer: return=representation)",
+    "captured": "2026-11-01",
+    "note": "201 with a one-element array holding the inserted row. public.moods has no server-side defaults, so the row is the body as sent - which is what lets the offline fake echo the request rather than invent a shape. Captured status: 201.",
+    "scrubbed": "user_id replaced with a placeholder; no keys or tokens in the body"
+  },
+  "payload": [
+    {
+      "user_id": "00000000-0000-4000-8000-0000000000aa",
+      "created_at": "2026-10-30",
+      "mood": 4,
+      "description": "Captured."
+    }
+  ]
+}
